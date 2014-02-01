@@ -8,6 +8,8 @@ package {
   import flash.net.URLVariables;
   import flash.system.Capabilities;
   import flash.utils.*;
+  import mx.utils.URLUtil;
+  import mx.utils.LoaderUtil;
 
   // ZeroClipboard
   //
@@ -240,9 +242,22 @@ package {
     private static function parseQuery(url:String): Object {
       var query:Object = null;
       if (url) {
-        url = url.split("?").slice(1).join("?");
+        var index:Number = url.indexOf("?");
+        url = index !== -1 ? url.slice(index + 1) : "";
+        url = url.replace(/%[A-Fa-f0-9]?([^A-Fa-f0-9]|$)/g, "");
+        url = url.replace(/%00/g, "%2500");
+        url = url.replace(/&&+/g, "&");
+debugLog('Regexed query: ' + url);
         if (url) {
+debugLog('query: ' + url);
+debugLog('Unescaped query: ' + unescape(url));
           query = new URLVariables(url);
+          // If any query with multiple of the same key present, only take the last value
+          for (var key:String in query) {
+            if (query.hasOwnProperty(key) && query[key] is Array && query[key].length) {
+              query[key] = query[key].pop() as String;
+            }
+          }
         }
       }
       return query;
@@ -255,18 +270,35 @@ package {
     // returns Object (the actual FlashVars)
     private static function getFlashVars(loaderInfoParameters:Object, swfUrl:String): Object {
       var flashVars:Object = {};
+
+debugLog('URL: ' + swfUrl);
+debugLog('Sanitized URL: ' + ZeroClipboard.sanitizeString(swfUrl));
+debugLog('loaderInfo.params: ' + JSON.stringify(loaderInfoParameters));
+
       var queryParams:Object = ZeroClipboard.parseQuery(swfUrl);
       if (queryParams) {
         for (var key:String in loaderInfoParameters) {
           if (loaderInfoParameters.hasOwnProperty(key)) {
             var value:String = ZeroClipboard.sanitizeString(loaderInfoParameters[key] as String);
-            if (!(queryParams.hasOwnProperty(key) && ZeroClipboard.sanitizeString(queryParams[key]) === value)) {
+debugLog('LoaderKey: ' + key);
+debugLog('LoaderValue: ' + value);
+debugLog('QueryValue: ' + ZeroClipboard.sanitizeString(queryParams[key] || "<notFound>"));
+            if (!(queryParams.hasOwnProperty(key) && ZeroClipboard.sanitizeString(queryParams[key] as String) === value)) {
               flashVars[key] = value;
+debugLog('Did not match!');
             }
+else {
+  debugLog('Matched!');
+}
           }
         }
       }
+debugLog('Final flashVars: ' + JSON.stringify(flashVars, null, 2));
       return flashVars;
     }
+
+private static function debugLog(msg:String): void {
+  ExternalInterface.call("(function(msg) { console.log(msg); })", msg);
+}
   }
 }
