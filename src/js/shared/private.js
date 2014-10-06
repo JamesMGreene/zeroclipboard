@@ -5,7 +5,7 @@
  * @private
  */
 var _args = function(argumentsObj) {
-  return _slice.call(argumentsObj, 0);
+  return _slice.call(argumentsObj);
 };
 
 
@@ -136,29 +136,18 @@ var _deleteOwnProperties = function(obj) {
 
 
 /**
- * Determine if an element is contained within another element.
+ * Determine if an element is contained within another element (or IS that element).
  *
  * @returns Boolean
  * @private
  */
 var _containedBy = function(el, ancestorEl) {
-  if (
-    el && el.nodeType === 1 && el.ownerDocument &&
-    ancestorEl && (
-      (ancestorEl.nodeType === 1 && ancestorEl.ownerDocument && ancestorEl.ownerDocument === el.ownerDocument) ||
-      (ancestorEl.nodeType === 9 && !ancestorEl.ownerDocument && ancestorEl === el.ownerDocument)
-    )
-  ) {
-    do {
-      if (el === ancestorEl) {
-        return true;
-      }
-      el = el.parentNode;
-    }
-    while (el);
-  }
-
-  return false;
+  var result = ancestorEl && el &&
+    (
+      ancestorEl === el ||
+      (ancestorEl.contains && ancestorEl.contains(el))
+    );
+  return result;
 };
 
 
@@ -314,4 +303,34 @@ var _getUnanimousScriptParentDir = function() {
 var _getDefaultSwfPath = function() {
   var jsDir = _getDirPathOfUrl(_getCurrentScriptUrl()) || _getUnanimousScriptParentDir() || "";
   return jsDir + "ZeroClipboard.swf";
+};
+
+
+/**
+ * Create a new MouseEvent.
+ * @private
+ */
+var _createMouseEvent = function(args) {
+  var e, argsArray;
+
+  // This patches a bug with `MouseEvent#initMouseEvent` in IE9
+  if (typeof args.relatedTarget === "undefined") {
+    args.relatedTarget = null;
+  }
+
+  if (_canUseMouseEventCtor) {
+    e = new _window.MouseEvent(args.type, args);
+  }
+  else if (_document.createEvent) {
+    argsArray = [
+      args.type, args.bubbles, args.cancelable, args.view, args.detail,
+      args.screenX, args.screenY, args.clientX, args.clientY,
+      args.ctrlKey, args.altKey, args.shiftKey, args.metaKey,
+      args.button, args.relatedTarget
+    ];
+    e = _document.createEvent("MouseEvents");
+    e.initMouseEvent.apply(e, argsArray);
+  }
+
+  return e;
 };

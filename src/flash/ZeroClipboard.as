@@ -33,7 +33,6 @@ package {
      */
     private var clipboard:ClipboardInjector = null;
 
-
     /**
      * @constructor
      */
@@ -130,8 +129,8 @@ package {
       // Only proceed if this SWF is hosted in the browser as expected
       if (this.jsProxy.isComplete()) {
 
-        // Add the MouseEvent listeners
-        this.addMouseHandlers(button);
+        // Add MouseEvent listeners
+        button.addEventListener(MouseEvent.CLICK, this.onClickCopyToClipboard);
 
         // Expose the external functions
         this.jsProxy.addCallback(
@@ -195,7 +194,7 @@ package {
      *
      * @return `undefined`
      */
-    private function onClick(event:MouseEvent): void {
+    private function onClickCopyToClipboard(event:MouseEvent): void {
       var clipData:Object;  // NOPMD
       var clipInjectSuccess:Object = {};  // NOPMD
 
@@ -216,6 +215,9 @@ package {
           data: clipData
         }
       );
+
+      // Finally, remind the ZeroClipboard JS to initiate a synthetic click event
+      this.emit("_click");
     }
 
 
@@ -241,59 +243,6 @@ package {
         this.jsProxy.send(this.jsEmitter, [eventObj]);
       }
       return result;
-    }
-
-
-    /**
-     * Signals to the page that a MouseEvent occurred.
-     *
-     * @return `undefined`
-     */
-    private function onMouseEvent(event:MouseEvent): void {
-      var evtData:Object = {}; // NOPMD
-
-      // If an event is passed in, return what modifier keys are pressed, etc.
-      if (event) {
-        var props:Object;  // NOPMD
-        props = {
-          "altKey": "altKey",
-          "commandKey": "metaKey",
-          "controlKey": "ctrlKey",
-          "shiftKey": "shiftKey",
-          "clickCount": "detail",
-          "movementX": "movementX",
-          "movementY": "movementY",
-          "stageX": "_stageX",
-          "stageY": "_stageY"
-        };
-
-        for (var prop in props) {
-          if (event.hasOwnProperty(prop) && event[prop] != null) {
-            evtData[props[prop]] = event[prop];
-          }
-        }
-        evtData.type = "_" + event.type.toLowerCase();
-        evtData._source = "swf";
-      }
-
-      this.emit(evtData.type, evtData);
-    }
-
-
-    /**
-     * Add mouse event handlers to the button.
-     *
-     * @return `undefined`
-     */
-    private function addMouseHandlers(button:Sprite): Sprite {
-      button.addEventListener(MouseEvent.MOUSE_MOVE, this.onMouseEvent);
-      button.addEventListener(MouseEvent.MOUSE_OVER, this.onMouseEvent);
-      button.addEventListener(MouseEvent.MOUSE_OUT, this.onMouseEvent);
-      button.addEventListener(MouseEvent.MOUSE_DOWN, this.onMouseEvent);
-      button.addEventListener(MouseEvent.MOUSE_UP, this.onMouseEvent);
-      button.addEventListener(MouseEvent.CLICK, this.onClick);
-      button.addEventListener(MouseEvent.CLICK, this.onMouseEvent);
-      return button;
     }
   }
 }

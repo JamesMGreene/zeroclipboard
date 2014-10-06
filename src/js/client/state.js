@@ -33,18 +33,10 @@ var _elementMeta = {};
 
 
 /**
- * Keep track of the state of the mouse event handlers for clipped elements.
- *
- * Entry structure:
- *   _mouseHandlers[element.zcClippingId] = {
- *     mouseover:  function(event) {},
- *     mouseout:   function(event) {},
- *     mouseenter: function(event) {},
- *     mouseleave: function(event) {},
- *     mousemove:  function(event) {}
- *   };
+ * Temporarily keep track of the last clipped element that was `mouseover`-ed to dedupe `mouseover` events.
+ * @private
  */
-var _mouseHandlers = {};
+var _lastMouseoverEl;
 
 
 /**

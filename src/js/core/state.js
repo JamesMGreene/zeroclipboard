@@ -50,6 +50,20 @@ var _copyTarget;
 
 
 /**
+ * A list of event properties to NOT maintain from the `mouseup` event data for use in simulating `click`.
+ * @private
+ */
+var _mouseupEventPropsToExclude = ["type", "target", "relatedTarget", "srcElement", "toElement", "fromElement"];
+
+
+/**
+ * The MouseEvent data from `mouseup` to regurgitate for the simulated `click` dispatch.
+ * @private
+ */
+var _mouseupEventData;
+
+
+/**
  * Keep track of data for the pending clipboard transaction.
  * @private
  */

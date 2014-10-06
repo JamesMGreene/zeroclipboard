@@ -12,18 +12,31 @@
  * Store references to critically important global functions that may be
  * overridden on certain web pages.
  */
-  var _window = window, _document = _window.document, _navigator = _window.navigator, _setTimeout = _window.setTimeout, _encodeURIComponent = _window.encodeURIComponent, _ActiveXObject = _window.ActiveXObject, _Error = _window.Error, _parseInt = _window.Number.parseInt || _window.parseInt, _parseFloat = _window.Number.parseFloat || _window.parseFloat, _isNaN = _window.Number.isNaN || _window.isNaN, _round = _window.Math.round, _now = _window.Date.now, _keys = _window.Object.keys, _defineProperty = _window.Object.defineProperty, _hasOwn = _window.Object.prototype.hasOwnProperty, _slice = _window.Array.prototype.slice, _unwrap = function() {
+  var _window = window, _document = _window.document, _navigator = _window.navigator, _setTimeout = _window.setTimeout, _encodeURIComponent = _window.encodeURIComponent, _ActiveXObject = _window.ActiveXObject, _Error = _window.Error, _parseInt = _window.parseInt, _parseFloat = _window.parseFloat, _isNaN = _window.isNaN, _round = _window.Math.round, _now = _window.Date.now, _keys = _window.Object.keys, _defineProperty = _window.Object.defineProperty, _hasOwn = _window.Object.prototype.hasOwnProperty, _slice = _window.Array.prototype.slice, _canUseMouseEventCtor = function(MouseEvent) {
+    if (typeof MouseEvent !== "undefined" && MouseEvent) {
+      try {
+        var evt = new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true
+        });
+        return evt ? true : false;
+      } catch (e) {}
+    }
+    return false;
+  }(_window.MouseEvent), _unwrap = function() {
     var unwrapper = function(el) {
       return el;
     };
     if (typeof _window.wrap === "function" && typeof _window.unwrap === "function") {
+      var el, unwrappedEl;
       try {
-        var div = _document.createElement("div");
-        var unwrappedDiv = _window.unwrap(div);
-        if (div.nodeType === 1 && unwrappedDiv && unwrappedDiv.nodeType === 1) {
+        el = _document.createElement("div");
+        unwrappedEl = _window.unwrap(el);
+        if (el.nodeType === 1 && unwrappedEl && unwrappedEl.nodeType === 1) {
           unwrapper = _window.unwrap;
         }
       } catch (e) {}
+      el = unwrappedEl = null;
     }
     return unwrapper;
   }();
@@ -34,7 +47,7 @@
  * @private
  */
   var _args = function(argumentsObj) {
-    return _slice.call(argumentsObj, 0);
+    return _slice.call(argumentsObj);
   };
   /**
  * Shallow-copy the owned, enumerable properties of one object over to another, similar to jQuery's `$.extend`.
@@ -136,21 +149,14 @@
     return obj;
   };
   /**
- * Determine if an element is contained within another element.
+ * Determine if an element is contained within another element (or IS that element).
  *
  * @returns Boolean
  * @private
  */
   var _containedBy = function(el, ancestorEl) {
-    if (el && el.nodeType === 1 && el.ownerDocument && ancestorEl && (ancestorEl.nodeType === 1 && ancestorEl.ownerDocument && ancestorEl.ownerDocument === el.ownerDocument || ancestorEl.nodeType === 9 && !ancestorEl.ownerDocument && ancestorEl === el.ownerDocument)) {
-      do {
-        if (el === ancestorEl) {
-          return true;
-        }
-        el = el.parentNode;
-      } while (el);
-    }
-    return false;
+    var result = ancestorEl && el && (ancestorEl === el || ancestorEl.contains && ancestorEl.contains(el));
+    return result;
   };
   /**
  * Get the URL path's parent directory.
@@ -272,6 +278,24 @@
     return jsDir + "ZeroClipboard.swf";
   };
   /**
+ * Create a new MouseEvent.
+ * @private
+ */
+  var _createMouseEvent = function(args) {
+    var e, argsArray;
+    if (typeof args.relatedTarget === "undefined") {
+      args.relatedTarget = null;
+    }
+    if (_canUseMouseEventCtor) {
+      e = new _window.MouseEvent(args.type, args);
+    } else if (_document.createEvent) {
+      argsArray = [ args.type, args.bubbles, args.cancelable, args.view, args.detail, args.screenX, args.screenY, args.clientX, args.clientY, args.ctrlKey, args.altKey, args.shiftKey, args.metaKey, args.button, args.relatedTarget ];
+      e = _document.createEvent("MouseEvents");
+      e.initMouseEvent.apply(e, argsArray);
+    }
+    return e;
+  };
+  /**
  * Keep track of the state of the Flash object.
  * @private
  */
@@ -307,6 +331,16 @@
  * @private
  */
   var _copyTarget;
+  /**
+ * A list of event properties to NOT maintain from the `mouseup` event data for use in simulating `click`.
+ * @private
+ */
+  var _mouseupEventPropsToExclude = [ "type", "target", "relatedTarget", "srcElement", "toElement", "fromElement" ];
+  /**
+ * The MouseEvent data from `mouseup` to regurgitate for the simulated `click` dispatch.
+ * @private
+ */
+  var _mouseupEventData;
   /**
  * Keep track of data for the pending clipboard transaction.
  * @private
@@ -731,7 +765,6 @@
     if (event.target && !event.relatedTarget) {
       event.relatedTarget = _getRelatedTarget(event.target);
     }
-    event = _addMouseData(event);
     return event;
   };
   /**
@@ -741,52 +774,6 @@
   var _getRelatedTarget = function(targetEl) {
     var relatedTargetId = targetEl && targetEl.getAttribute && targetEl.getAttribute("data-clipboard-target");
     return relatedTargetId ? _document.getElementById(relatedTargetId) : null;
-  };
-  /**
- * Add element and position data to `MouseEvent` instances
- * @private
- */
-  var _addMouseData = function(event) {
-    if (event && /^_(?:click|mouse(?:over|out|down|up|move))$/.test(event.type)) {
-      var srcElement = event.target;
-      var fromElement = event.type === "_mouseover" && event.relatedTarget ? event.relatedTarget : undefined;
-      var toElement = event.type === "_mouseout" && event.relatedTarget ? event.relatedTarget : undefined;
-      var pos = _getDOMObjectPosition(srcElement);
-      var screenLeft = _window.screenLeft || _window.screenX || 0;
-      var screenTop = _window.screenTop || _window.screenY || 0;
-      var scrollLeft = _document.body.scrollLeft + _document.documentElement.scrollLeft;
-      var scrollTop = _document.body.scrollTop + _document.documentElement.scrollTop;
-      var pageX = pos.left + (typeof event._stageX === "number" ? event._stageX : 0);
-      var pageY = pos.top + (typeof event._stageY === "number" ? event._stageY : 0);
-      var clientX = pageX - scrollLeft;
-      var clientY = pageY - scrollTop;
-      var screenX = screenLeft + clientX;
-      var screenY = screenTop + clientY;
-      var moveX = typeof event.movementX === "number" ? event.movementX : 0;
-      var moveY = typeof event.movementY === "number" ? event.movementY : 0;
-      delete event._stageX;
-      delete event._stageY;
-      _extend(event, {
-        srcElement: srcElement,
-        fromElement: fromElement,
-        toElement: toElement,
-        screenX: screenX,
-        screenY: screenY,
-        pageX: pageX,
-        pageY: pageY,
-        clientX: clientX,
-        clientY: clientY,
-        x: clientX,
-        y: clientY,
-        movementX: moveX,
-        movementY: moveY,
-        offsetX: 0,
-        offsetY: 0,
-        layerX: 0,
-        layerY: 0
-      });
-    }
-    return event;
   };
   /**
  * Determine if an event's registered handlers should be execute synchronously or asynchronously.
@@ -853,9 +840,8 @@
  * @private
  */
   var _preprocessEvent = function(event) {
+    var stopProcessingThisEvent = false;
     var element = event.target || _currentElement || null;
-    var sourceIsSwf = event._source === "swf";
-    delete event._source;
     var flashErrorNames = [ "flash-disabled", "flash-outdated", "flash-unavailable", "flash-deactivated", "flash-overdue" ];
     switch (event.type) {
      case "error":
@@ -908,76 +894,18 @@
       }
       break;
 
-     case "_mouseover":
-      ZeroClipboard.focus(element);
-      if (_globalConfig.bubbleEvents === true && sourceIsSwf) {
-        if (element && element !== event.relatedTarget && !_containedBy(event.relatedTarget, element)) {
-          _fireMouseEvent(_extend({}, event, {
-            type: "mouseenter",
-            bubbles: false,
-            cancelable: false
-          }));
-        }
-        _fireMouseEvent(_extend({}, event, {
-          type: "mouseover"
-        }));
-      }
-      break;
-
-     case "_mouseout":
-      ZeroClipboard.blur();
-      if (_globalConfig.bubbleEvents === true && sourceIsSwf) {
-        if (element && element !== event.relatedTarget && !_containedBy(event.relatedTarget, element)) {
-          _fireMouseEvent(_extend({}, event, {
-            type: "mouseleave",
-            bubbles: false,
-            cancelable: false
-          }));
-        }
-        _fireMouseEvent(_extend({}, event, {
-          type: "mouseout"
-        }));
-      }
-      break;
-
-     case "_mousedown":
-      _addClass(element, _globalConfig.activeClass);
-      if (_globalConfig.bubbleEvents === true && sourceIsSwf) {
-        _fireMouseEvent(_extend({}, event, {
-          type: event.type.slice(1)
-        }));
-      }
-      break;
-
-     case "_mouseup":
-      _removeClass(element, _globalConfig.activeClass);
-      if (_globalConfig.bubbleEvents === true && sourceIsSwf) {
-        _fireMouseEvent(_extend({}, event, {
-          type: event.type.slice(1)
-        }));
-      }
-      break;
-
      case "_click":
+      if (_globalConfig.bubbleEvents === true) {
+        _fireMouseEvent(_extend({}, event, _mouseupEventData, {
+          type: "click"
+        }));
+      }
       _copyTarget = null;
-      if (_globalConfig.bubbleEvents === true && sourceIsSwf) {
-        _fireMouseEvent(_extend({}, event, {
-          type: event.type.slice(1)
-        }));
-      }
-      break;
-
-     case "_mousemove":
-      if (_globalConfig.bubbleEvents === true && sourceIsSwf) {
-        _fireMouseEvent(_extend({}, event, {
-          type: event.type.slice(1)
-        }));
-      }
+      _mouseupEventData = null;
+      stopProcessingThisEvent = true;
       break;
     }
-    if (/^_(?:click|mouse(?:over|out|down|up|move))$/.test(event.type)) {
-      return true;
-    }
+    return stopProcessingThisEvent;
   };
   /**
  * Dispatch a synthetic MouseEvent.
@@ -986,28 +914,130 @@
  * @private
  */
   var _fireMouseEvent = function(event) {
-    if (!(event && typeof event.type === "string" && event)) {
+    if (!(event && typeof event.type === "string" && event.type && event.target)) {
       return;
     }
-    var e, target = event.target || null, doc = target && target.ownerDocument || _document, defaults = {
+    var e, target = event.target, doc = target && target.ownerDocument || _document, defaults = {
       view: doc.defaultView || _window,
-      canBubble: true,
+      bubbles: true,
       cancelable: true,
       detail: event.type === "click" ? 1 : 0,
       button: typeof event.which === "number" ? event.which - 1 : typeof event.button === "number" ? event.button : doc.createEvent ? 0 : 1
     }, args = _extend(defaults, event);
-    if (!target) {
+    if (!(target && target.dispatchEvent)) {
       return;
     }
-    if (doc.createEvent && target.dispatchEvent) {
-      args = [ args.type, args.canBubble, args.cancelable, args.view, args.detail, args.screenX, args.screenY, args.clientX, args.clientY, args.ctrlKey, args.altKey, args.shiftKey, args.metaKey, args.button, args.relatedTarget ];
-      e = doc.createEvent("MouseEvents");
-      if (e.initMouseEvent) {
-        e.initMouseEvent.apply(e, args);
-        e._source = "js";
-        target.dispatchEvent(e);
+    e = _createMouseEvent(args);
+    _extend(e, {
+      _source: "zc"
+    });
+    target.dispatchEvent(e);
+  };
+  /**
+ * Stop all propagation of an event, both immediate and bubbling, but allow the default action.
+ * @private
+ */
+  var _stopAllPropagation = function(event) {
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+  };
+  /**
+ * The generic MouseEvent handler for the Flash object's container element.
+ * Refires the event, targeting the underlying clipped element instead.
+ * @private
+ */
+  var _onFlashBridgeGenericMouseEvent = function(event, element) {
+    element = element || _currentElement || event.target;
+    if (_globalConfig.bubbleEvents === true && element) {
+      _fireMouseEvent(_extend({}, event, {
+        target: element
+      }));
+    }
+    _stopAllPropagation(event);
+  };
+  /**
+ * The `mouseover` (and `mouseenter`) handler for the Flash object's container element.
+ * @private
+ */
+  var _onFlashBridgeMouseOver = function(event) {
+    var element;
+    if (_currentElement) {
+      element = _currentElement;
+      ZeroClipboard.focus(element);
+      if (_globalConfig.bubbleEvents === true) {
+        if (!_containedBy(event.relatedTarget, event.currentTarget)) {
+          _fireMouseEvent(_extend({}, event, {
+            type: "mouseenter",
+            target: element,
+            bubbles: false,
+            cancelable: false
+          }));
+        }
       }
     }
+    return _onFlashBridgeGenericMouseEvent(event, element);
+  };
+  /**
+ * The `mousedown` handler for the Flash object's container element.
+ * @private
+ */
+  var _onFlashBridgeMouseDown = function(event) {
+    _addClass(_currentElement, _globalConfig.activeClass);
+    return _onFlashBridgeGenericMouseEvent(event, _currentElement);
+  };
+  /**
+ * The `mouseup` handler for the Flash object's container element.
+ * @private
+ */
+  var _onFlashBridgeMouseUp = function(event) {
+    _removeClass(_currentElement, _globalConfig.activeClass);
+    _mouseupEventData = _omit(event, _mouseupEventPropsToExclude);
+    return _onFlashBridgeGenericMouseEvent(event, _currentElement);
+  };
+  /**
+ * The `mouseout` (and `mouseleave`) handler for the Flash object's container element.
+ * @private
+ */
+  var _onFlashBridgeMouseOut = function(event) {
+    var returnVal, element = _currentElement, leavingFlash = !_containedBy(event.relatedTarget, event.currentTarget);
+    if (leavingFlash) {
+      ZeroClipboard.blur();
+    }
+    if (leavingFlash && _globalConfig.bubbleEvents === true && element && !_containedBy(event.relatedTarget, element)) {
+      _fireMouseEvent(_extend({}, event, {
+        type: "mouseleave",
+        target: element,
+        bubbles: false,
+        cancelable: false
+      }));
+    }
+    returnVal = _onFlashBridgeGenericMouseEvent(event, element);
+    element = null;
+    return returnVal;
+  };
+  /**
+ * Add MouseEvent handlers to the Flash object's element (Flash bridge).
+ * @private
+ */
+  var _addSwfMouseEventHandlers = function(flashBridge) {
+    flashBridge.addEventListener("mouseover", _onFlashBridgeMouseOver, false);
+    flashBridge.addEventListener("mousemove", _onFlashBridgeGenericMouseEvent, false);
+    flashBridge.addEventListener("mousedown", _onFlashBridgeMouseDown, false);
+    flashBridge.addEventListener("mouseup", _onFlashBridgeMouseUp, false);
+    flashBridge.addEventListener("mouseout", _onFlashBridgeMouseOut, false);
+    flashBridge.addEventListener("click", _stopAllPropagation, false);
+  };
+  /**
+ * Remove MouseEvent handlers from the Flash object's element (Flash bridge).
+ * @private
+ */
+  var _removeSwfMouseEventHandlers = function(flashBridge) {
+    flashBridge.removeEventListener("mouseover", _onFlashBridgeMouseOver, false);
+    flashBridge.removeEventListener("mousemove", _onFlashBridgeGenericMouseEvent, false);
+    flashBridge.removeEventListener("mousedown", _onFlashBridgeMouseDown, false);
+    flashBridge.removeEventListener("mouseup", _onFlashBridgeMouseUp, false);
+    flashBridge.removeEventListener("mouseout", _onFlashBridgeMouseOut, false);
+    flashBridge.removeEventListener("click", _stopAllPropagation, false);
   };
   /**
  * Create the HTML bridge element to embed the Flash object into.
@@ -1060,6 +1090,7 @@
       tmpDiv = null;
       _unwrap(flashBridge).ZeroClipboard = ZeroClipboard;
       container.replaceChild(flashBridge, divToBeReplaced);
+      _addSwfMouseEventHandlers(flashBridge);
     }
     if (!flashBridge) {
       flashBridge = _document[_globalConfig.swfObjectId];
@@ -1080,8 +1111,9 @@
   var _unembedSwf = function() {
     var flashBridge = _flashState.bridge;
     if (flashBridge) {
-      var htmlBridge = _getHtmlBridge(flashBridge);
-      if (htmlBridge) {
+      var container = _getHtmlBridge(flashBridge);
+      if (container) {
+        _removeSwfMouseEventHandlers(flashBridge);
         if (_flashState.pluginType === "activex" && "readyState" in flashBridge) {
           flashBridge.style.display = "none";
           (function removeSwfFromIE() {
@@ -1094,8 +1126,8 @@
               if (flashBridge.parentNode) {
                 flashBridge.parentNode.removeChild(flashBridge);
               }
-              if (htmlBridge.parentNode) {
-                htmlBridge.parentNode.removeChild(htmlBridge);
+              if (container.parentNode) {
+                container.parentNode.removeChild(container);
               }
             } else {
               _setTimeout(removeSwfFromIE, 10);
@@ -1105,8 +1137,8 @@
           if (flashBridge.parentNode) {
             flashBridge.parentNode.removeChild(flashBridge);
           }
-          if (htmlBridge.parentNode) {
-            htmlBridge.parentNode.removeChild(htmlBridge);
+          if (container.parentNode) {
+            container.parentNode.removeChild(container);
           }
         }
       }
@@ -1801,18 +1833,10 @@
  */
   var _elementMeta = {};
   /**
- * Keep track of the state of the mouse event handlers for clipped elements.
- *
- * Entry structure:
- *   _mouseHandlers[element.zcClippingId] = {
- *     mouseover:  function(event) {},
- *     mouseout:   function(event) {},
- *     mouseenter: function(event) {},
- *     mouseleave: function(event) {},
- *     mousemove:  function(event) {}
- *   };
+ * Temporarily keep track of the last clipped element that was `mouseover`-ed to dedupe `mouseover` events.
+ * @private
  */
-  var _mouseHandlers = {};
+  var _lastMouseoverEl;
   /**
  * Extending the ZeroClipboard configuration defaults for the Client module.
  */
@@ -2104,68 +2128,77 @@
     return typeof elements.length !== "number" ? [ elements ] : elements;
   };
   /**
- * Add a `mouseover` handler function for a clipped element.
+ * The `mouseover` handler function to automatically activate clipped elements.
+ * @private
+ */
+  var _onElementMouseOver = function(event) {
+    if (event._source !== "zc") {
+      _lastMouseoverEl = event.currentTarget;
+    }
+    ZeroClipboard.focus(event.currentTarget);
+  };
+  /**
+ *
+ * @private
+ */
+  var _maybeSuppressMouseover = function(event) {
+    if (event._source === "zc" && _lastMouseoverEl && event.currentTarget === _lastMouseoverEl) {
+      if (event.type === "mouseover") {
+        _lastMouseoverEl = null;
+      }
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  };
+  /**
+ * Suppress a mouse event on clipped elements unless ZeroClipboard dispatched it.
+ * @private
+ */
+  var _suppressMouseEvent = function(event) {
+    if (event._source !== "zc") {
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  };
+  /**
+ * Adds mouse handler functions for a clipped element.
  *
  * @returns `undefined`
  * @private
  */
   var _addMouseHandlers = function(element) {
-    if (!(element && element.nodeType === 1)) {
-      return;
+    if (element && element.nodeType === 1) {
+      element.addEventListener("mouseover", _onElementMouseOver, false);
+      element.addEventListener("mouseenter", _maybeSuppressMouseover, false);
+      element.addEventListener("mouseover", _maybeSuppressMouseover, false);
+      element.addEventListener("mousemove", _suppressMouseEvent, false);
+      element.addEventListener("mousedown", _suppressMouseEvent, false);
+      element.addEventListener("mouseup", _suppressMouseEvent, false);
+      element.addEventListener("click", _suppressMouseEvent, false);
+      element.addEventListener("mouseleave", _suppressMouseEvent, false);
+      element.addEventListener("mouseout", _suppressMouseEvent, false);
     }
-    var _suppressMouseEvents = function(event) {
-      if (!(event || (event = _window.event))) {
-        return;
-      }
-      if (event._source !== "js") {
-        event.stopImmediatePropagation();
-        event.preventDefault();
-      }
-      delete event._source;
-    };
-    var _elementMouseOver = function(event) {
-      if (!(event || (event = _window.event))) {
-        return;
-      }
-      _suppressMouseEvents(event);
-      ZeroClipboard.focus(element);
-    };
-    element.addEventListener("mouseover", _elementMouseOver, false);
-    element.addEventListener("mouseout", _suppressMouseEvents, false);
-    element.addEventListener("mouseenter", _suppressMouseEvents, false);
-    element.addEventListener("mouseleave", _suppressMouseEvents, false);
-    element.addEventListener("mousemove", _suppressMouseEvents, false);
-    _mouseHandlers[element.zcClippingId] = {
-      mouseover: _elementMouseOver,
-      mouseout: _suppressMouseEvents,
-      mouseenter: _suppressMouseEvents,
-      mouseleave: _suppressMouseEvents,
-      mousemove: _suppressMouseEvents
-    };
   };
   /**
- * Remove a `mouseover` handler function for a clipped element.
+ * Removes mouse handler functions for a clipped element.
  *
  * @returns `undefined`
  * @private
  */
   var _removeMouseHandlers = function(element) {
-    if (!(element && element.nodeType === 1)) {
-      return;
+    if (element && element.nodeType === 1) {
+      element.removeEventListener("mouseover", _onElementMouseOver, false);
+      element.removeEventListener("mouseenter", _maybeSuppressMouseover, false);
+      element.removeEventListener("mouseover", _maybeSuppressMouseover, false);
+      element.removeEventListener("mousemove", _suppressMouseEvent, false);
+      element.removeEventListener("mousedown", _suppressMouseEvent, false);
+      element.removeEventListener("mouseup", _suppressMouseEvent, false);
+      element.removeEventListener("click", _suppressMouseEvent, false);
+      element.removeEventListener("mouseleave", _suppressMouseEvent, false);
+      element.removeEventListener("mouseout", _suppressMouseEvent, false);
     }
-    var mouseHandlers = _mouseHandlers[element.zcClippingId];
-    if (!(typeof mouseHandlers === "object" && mouseHandlers)) {
-      return;
-    }
-    var key, val, mouseEvents = [ "move", "leave", "enter", "out", "over" ];
-    for (var i = 0, len = mouseEvents.length; i < len; i++) {
-      key = "mouse" + mouseEvents[i];
-      val = mouseHandlers[key];
-      if (typeof val === "function") {
-        element.removeEventListener(key, val, false);
-      }
-    }
-    delete _mouseHandlers[element.zcClippingId];
   };
   /**
  * Creates a new ZeroClipboard client instance.
