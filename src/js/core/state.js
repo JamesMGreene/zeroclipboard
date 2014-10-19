@@ -50,6 +50,16 @@ var _copyTarget;
 
 
 /**
+ * Temporarily keep track of the most recent non-ZeroClipboard elements being `mouseover`/`mouseout`-ed of.
+ * @private
+ */
+var _mouseTracking = {
+  mouseover: null,
+  mouseout: null
+};
+
+
+/**
  * A list of event properties to NOT maintain from the `mouseup` event data for use in simulating `click`.
  * @private
  */

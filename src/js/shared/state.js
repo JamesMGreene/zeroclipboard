@@ -20,6 +20,19 @@ var _window = window,
     _defineProperty = _window.Object.defineProperty,
     _hasOwn = _window.Object.prototype.hasOwnProperty,
     _slice = _window.Array.prototype.slice,
+    _supportsMouseEnterAndMouseLeave = (function() {
+      var el,
+          isSupported = false;
+      try {
+        el = _document.createElement("div");
+        isSupported = "onmouseenter" in el && "onmouseleave" in el;
+      }
+      catch (e) {
+        // Ignore
+      }
+      el = null;
+      return isSupported;
+    })(),
     _canUseMouseEventCtor = (function(MouseEvent) {
       if (typeof MouseEvent !== "undefined" && MouseEvent) {
         try {

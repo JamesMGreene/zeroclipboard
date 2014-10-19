@@ -147,7 +147,7 @@ var _containedBy = function(el, ancestorEl) {
       ancestorEl === el ||
       (ancestorEl.contains && ancestorEl.contains(el))
     );
-  return result;
+  return result === true;
 };
 
 
@@ -333,4 +333,98 @@ var _createMouseEvent = function(args) {
   }
 
   return e;
+};
+
+
+/**
+ * Stop all propagation of an event, both immediate and bubbling, but allow the default action.
+ * @private
+ */
+var _stopAllPropagation = function(event) {
+  if (event) {
+    event.stopImmediatePropagation();
+    event.stopPropagation();    
+  }
+};
+
+
+//
+// TODO: Remove after debugging
+//
+var _getElementIdentifier = function(el) {
+  if (el === _window) {
+    return "(window)";
+  }
+
+  if (typeof _window.getElementIdentifier === "function") {
+    return _window.getElementIdentifier.apply(this, arguments);
+  }
+
+  if (el == null) {
+    return "(" + el + ")";
+  }
+  var classes = el.className.replace(/^\s+|\s+$/g, "").split(/\s+/).join(".");
+  return el.nodeName.toLowerCase() + (el.id ? "#" + el.id : "") + (classes ? "." + classes : "");
+};
+
+
+//
+// TODO: Remove after debugging
+//
+var _debugUtilEventDump = function(title, event) {
+  if (_window.console && _window.console.log) {
+    var message = "",
+        mouseTrackingDump = {},
+        canGroup = !!(_window.console.group && _window.console.groupEnd);
+
+    if (!title) {
+      _window.console.log("No `title` argument passed to _debugUtilEventDump");
+      return;
+    }
+    if (!event) {
+      _window.console.log("No `event` argument passed to _debugUtilEventDump");
+      return;
+    }
+
+    if (_mouseTracking) {
+      Object.keys(_mouseTracking).forEach(function(eventType) {
+        if (_mouseTracking[eventType]) {
+          Object.keys(_mouseTracking[eventType]).forEach(function(prop) {
+            if (!mouseTrackingDump[eventType]) {
+              mouseTrackingDump[eventType] = {};
+            }
+            mouseTrackingDump[eventType][prop] = _getElementIdentifier(_mouseTracking[eventType][prop]);
+          });
+        }
+      });
+    }
+
+    if (event && event.type) {
+      message = JSON.stringify({
+        type: event.type,
+        target: _getElementIdentifier(event.target),
+        currentTarget: _getElementIdentifier(event.currentTarget),
+        relatedTarget: _getElementIdentifier(event.relatedTarget),
+        _source: event._source,
+        _source2: event._source2,
+        _currentElement: _getElementIdentifier(_currentElement),
+        _mouseTracking: mouseTrackingDump
+      }, null, 2);
+    }
+
+    if (message) {
+      if (canGroup) {
+        _window.console.group(title);
+      }
+      else {
+        message = title + ":\n" + message;
+      }
+    }
+
+    _window.console.log(message || title);
+
+    if (message && canGroup) {
+      _window.console.groupEnd();
+    }
+  }
 };

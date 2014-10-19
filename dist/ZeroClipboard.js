@@ -12,7 +12,15 @@
  * Store references to critically important global functions that may be
  * overridden on certain web pages.
  */
-  var _window = window, _document = _window.document, _navigator = _window.navigator, _setTimeout = _window.setTimeout, _encodeURIComponent = _window.encodeURIComponent, _ActiveXObject = _window.ActiveXObject, _Error = _window.Error, _parseInt = _window.parseInt, _parseFloat = _window.parseFloat, _isNaN = _window.isNaN, _round = _window.Math.round, _now = _window.Date.now, _keys = _window.Object.keys, _defineProperty = _window.Object.defineProperty, _hasOwn = _window.Object.prototype.hasOwnProperty, _slice = _window.Array.prototype.slice, _canUseMouseEventCtor = function(MouseEvent) {
+  var _window = window, _document = _window.document, _navigator = _window.navigator, _setTimeout = _window.setTimeout, _encodeURIComponent = _window.encodeURIComponent, _ActiveXObject = _window.ActiveXObject, _Error = _window.Error, _parseInt = _window.parseInt, _parseFloat = _window.parseFloat, _isNaN = _window.isNaN, _round = _window.Math.round, _now = _window.Date.now, _keys = _window.Object.keys, _defineProperty = _window.Object.defineProperty, _hasOwn = _window.Object.prototype.hasOwnProperty, _slice = _window.Array.prototype.slice, _supportsMouseEnterAndMouseLeave = function() {
+    var el, isSupported = false;
+    try {
+      el = _document.createElement("div");
+      isSupported = "onmouseenter" in el && "onmouseleave" in el;
+    } catch (e) {}
+    el = null;
+    return isSupported;
+  }(), _canUseMouseEventCtor = function(MouseEvent) {
     if (typeof MouseEvent !== "undefined" && MouseEvent) {
       try {
         var evt = new MouseEvent("click", {
@@ -156,7 +164,7 @@
  */
   var _containedBy = function(el, ancestorEl) {
     var result = ancestorEl && el && (ancestorEl === el || ancestorEl.contains && ancestorEl.contains(el));
-    return result;
+    return result === true;
   };
   /**
  * Get the URL path's parent directory.
@@ -296,6 +304,77 @@
     return e;
   };
   /**
+ * Stop all propagation of an event, both immediate and bubbling, but allow the default action.
+ * @private
+ */
+  var _stopAllPropagation = function(event) {
+    if (event) {
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+    }
+  };
+  var _getElementIdentifier = function(el) {
+    if (el === _window) {
+      return "(window)";
+    }
+    if (typeof _window.getElementIdentifier === "function") {
+      return _window.getElementIdentifier.apply(this, arguments);
+    }
+    if (el == null) {
+      return "(" + el + ")";
+    }
+    var classes = el.className.replace(/^\s+|\s+$/g, "").split(/\s+/).join(".");
+    return el.nodeName.toLowerCase() + (el.id ? "#" + el.id : "") + (classes ? "." + classes : "");
+  };
+  var _debugUtilEventDump = function(title, event) {
+    if (_window.console && _window.console.log) {
+      var message = "", mouseTrackingDump = {}, canGroup = !!(_window.console.group && _window.console.groupEnd);
+      if (!title) {
+        _window.console.log("No `title` argument passed to _debugUtilEventDump");
+        return;
+      }
+      if (!event) {
+        _window.console.log("No `event` argument passed to _debugUtilEventDump");
+        return;
+      }
+      if (_mouseTracking) {
+        Object.keys(_mouseTracking).forEach(function(eventType) {
+          if (_mouseTracking[eventType]) {
+            Object.keys(_mouseTracking[eventType]).forEach(function(prop) {
+              if (!mouseTrackingDump[eventType]) {
+                mouseTrackingDump[eventType] = {};
+              }
+              mouseTrackingDump[eventType][prop] = _getElementIdentifier(_mouseTracking[eventType][prop]);
+            });
+          }
+        });
+      }
+      if (event && event.type) {
+        message = JSON.stringify({
+          type: event.type,
+          target: _getElementIdentifier(event.target),
+          currentTarget: _getElementIdentifier(event.currentTarget),
+          relatedTarget: _getElementIdentifier(event.relatedTarget),
+          _source: event._source,
+          _source2: event._source2,
+          _currentElement: _getElementIdentifier(_currentElement),
+          _mouseTracking: mouseTrackingDump
+        }, null, 2);
+      }
+      if (message) {
+        if (canGroup) {
+          _window.console.group(title);
+        } else {
+          message = title + ":\n" + message;
+        }
+      }
+      _window.console.log(message || title);
+      if (message && canGroup) {
+        _window.console.groupEnd();
+      }
+    }
+  };
+  /**
  * Keep track of the state of the Flash object.
  * @private
  */
@@ -331,6 +410,14 @@
  * @private
  */
   var _copyTarget;
+  /**
+ * Temporarily keep track of the most recent non-ZeroClipboard elements being `mouseover`/`mouseout`-ed of.
+ * @private
+ */
+  var _mouseTracking = {
+    mouseover: null,
+    mouseout: null
+  };
   /**
  * A list of event properties to NOT maintain from the `mouseup` event data for use in simulating `click`.
  * @private
@@ -762,7 +849,7 @@
     if (event.type === "aftercopy") {
       event = _mapClipResultsFromFlash(event, _clipDataFormatMap);
     }
-    if (event.target && !event.relatedTarget) {
+    if (/^(?:before|after)?copy$/.test(event.type) && event.target && !event.relatedTarget) {
       event.relatedTarget = _getRelatedTarget(event.target);
     }
     return event;
@@ -929,102 +1016,180 @@
     }
     e = _createMouseEvent(args);
     _extend(e, {
-      _source: "zc"
+      _source: "zc",
+      _source2: event._source2
     });
+    if (e.type !== "mousemove") {
+      _debugUtilEventDump("ZC.Core _fireMouseEvent", _extend({}, e, {
+        target: target
+      }));
+    }
     target.dispatchEvent(e);
   };
   /**
- * Stop all propagation of an event, both immediate and bubbling, but allow the default action.
+ * Given a pending `mouseover`/`mouseout` event: fire a corresponding
+ * `mouseenter`/`mouseleave` event, if appropriate; then fire pending event.
  * @private
  */
-  var _stopAllPropagation = function(event) {
-    event.stopImmediatePropagation();
-    event.stopPropagation();
-  };
-  /**
- * The generic MouseEvent handler for the Flash object's container element.
- * Refires the event, targeting the underlying clipped element instead.
- * @private
- */
-  var _onFlashBridgeGenericMouseEvent = function(event, element) {
-    element = element || _currentElement || event.target;
-    if (_globalConfig.bubbleEvents === true && element) {
-      _fireMouseEvent(_extend({}, event, {
-        target: element
-      }));
+  var _synthesizeMouseEntryAndExit = function(event) {
+    var supplementalType = event.type === "mouseover" ? "mouseenter" : event.type === "mouseout" ? "mouseleave" : null;
+    if (supplementalType && _globalConfig.bubbleEvents === true) {
+      if (_supportsMouseEnterAndMouseLeave && !_containedBy(event.relatedTarget, event.target)) {
+        _fireMouseEvent(_extend({}, event, {
+          type: supplementalType,
+          bubbles: false,
+          cancelable: false
+        }));
+      }
+      return _fireMouseEvent(event);
     }
-    _stopAllPropagation(event);
   };
   /**
- * The `mouseover` (and `mouseenter`) handler for the Flash object's container element.
+ * Track the relevant targets of all window-level "mouseout" events.
  * @private
  */
-  var _onFlashBridgeMouseOver = function(event) {
-    var element;
-    if (_currentElement) {
-      element = _currentElement;
-      ZeroClipboard.focus(element);
-      if (_globalConfig.bubbleEvents === true) {
-        if (!_containedBy(event.relatedTarget, event.currentTarget)) {
-          _fireMouseEvent(_extend({}, event, {
-            type: "mouseenter",
-            target: element,
-            bubbles: false,
-            cancelable: false
-          }));
-        }
+  var _onWindowMouseOverAndOut = function(event) {
+    if (event && event._source === "zc") {
+      return;
+    }
+    if (_globalConfig.bubbleEvents !== true) {
+      return;
+    }
+    _debugUtilEventDump("window " + event.type + " capture", event);
+    var eventType = event.type, isMouseover = eventType === "mouseover", isMouseout = eventType === "mouseout", relevantTargetProp = isMouseover ? "target" : isMouseout ? "relatedTarget" : null, oppositeTargetProp = isMouseover ? "relatedTarget" : isMouseout ? "target" : null, relevantTarget = relevantTargetProp ? event[relevantTargetProp] : null, oppositeTarget = oppositeTargetProp ? event[oppositeTargetProp] : null, htmlBridge = _getHtmlBridge(_flashState.bridge), modifiedEventTarget = {}, relevantTargetIsInCurrentElement = _containedBy(relevantTarget, _currentElement), relevantTargetIsInHtmlBridge = _containedBy(relevantTarget, htmlBridge), oppositeTargetIsInCurrentElement = _containedBy(oppositeTarget, _currentElement), oppositeTargetIsInHtmlBridge = _containedBy(oppositeTarget, htmlBridge);
+    if (!htmlBridge || !relevantTarget) {
+      return;
+    }
+    if (_currentElement && oppositeTarget) {
+      if ((relevantTargetIsInCurrentElement || relevantTargetIsInHtmlBridge) && (oppositeTargetIsInCurrentElement || oppositeTargetIsInHtmlBridge)) {
+        _debugUtilEventDump("Global stopProp1", event);
+        _stopAllPropagation(event);
+        return;
+      }
+      if (!relevantTargetIsInCurrentElement && !relevantTargetIsInHtmlBridge && !oppositeTargetIsInCurrentElement && oppositeTargetIsInHtmlBridge && event._source !== "zc") {
+        _debugUtilEventDump("Global stopProp2, preventDefault, and refire", event);
+        _stopAllPropagation(event);
+        event.preventDefault();
+        modifiedEventTarget[oppositeTargetProp] = _currentElement;
+        modifiedEventTarget._source2 = "_onWindowMouseOverAndOut synthesis of " + event.type;
+        return _synthesizeMouseEntryAndExit(_extend({}, event, modifiedEventTarget));
       }
     }
-    return _onFlashBridgeGenericMouseEvent(event, element);
+    if (!relevantTargetIsInCurrentElement && !relevantTargetIsInHtmlBridge && (!oppositeTarget || !_currentElement || oppositeTargetIsInCurrentElement || oppositeTargetIsInHtmlBridge)) {
+      _debugUtilEventDump("Global all the correct targets", event);
+      _mouseTracking[eventType] = {
+        relevantTarget: relevantTarget,
+        oppositeTarget: oppositeTarget,
+        target: _containedBy(event.target, htmlBridge) ? _currentElement : event.target,
+        relatedTarget: _containedBy(event.relatedTarget, htmlBridge) ? _currentElement : event.relatedTarget
+      };
+    }
   };
   /**
- * The `mousedown` handler for the Flash object's container element.
+ * Get the best possible `relatedTarget` value for a ZeroClipboard-synthesized `mouseover`/`mouseout` event.
  * @private
  */
-  var _onFlashBridgeMouseDown = function(event) {
+  var _getRelatedTargetForMouseEntryAndExit = function(originalEvent) {
+    var relatedTarget = null, htmlBridge = _getHtmlBridge(_flashState.bridge);
+    if (originalEvent && originalEvent.relatedTarget) {
+      if (_containedBy(originalEvent.relatedTarget, _currentElement) || _containedBy(originalEvent.relatedTarget, htmlBridge)) {
+        relatedTarget = _currentElement;
+      } else {
+        relatedTarget = originalEvent.relatedTarget;
+      }
+    } else if (_mouseTracking && _mouseTracking.mouseout && _mouseTracking.mouseout.target && !_containedBy(_mouseTracking.mouseout.target, _currentElement) && !_containedBy(_mouseTracking.mouseout.target, htmlBridge)) {
+      relatedTarget = _mouseTracking.mouseout.target;
+    } else if (_mouseTracking && _mouseTracking.mouseover && _mouseTracking.mouseover.relatedTarget && !_containedBy(_mouseTracking.mouseover.relatedTarget, _currentElement) && !_containedBy(_mouseTracking.mouseover.relatedTarget, htmlBridge)) {
+      relatedTarget = _mouseTracking.mouseover.relatedTarget;
+    }
+    return relatedTarget;
+  };
+  /**
+ * The `mouseenter`/`mouseover`/`mouseleave`/`mouseout` handler for the Flash object's element.
+ * @private
+ */
+  var _onFlashBridgeMouseEntryAndExit = function(originalEvent) {
+    _debugUtilEventDump("_onFlashBridgeMouseEntryAndExit", originalEvent);
+    if (originalEvent._source === "zc" || !_currentElement) {
+      return;
+    }
+    var event = _extend({}, originalEvent, {
+      target: _currentElement,
+      relatedTarget: _getRelatedTargetForMouseEntryAndExit(originalEvent),
+      _source2: "_onFlashBridgeMouseEntryAndExit synthesis of " + originalEvent.type
+    });
+    if (!event.relatedTarget || event.target === event.relatedTarget) {
+      return;
+    }
+    _debugUtilEventDump("_onFlashBridgeMouseEntryAndExit's new synthesized event", event);
+    _stopAllPropagation(originalEvent);
+    return _synthesizeMouseEntryAndExit(event);
+  };
+  /**
+ * The `mousemove` handler for the Flash object's element.
+ * @private
+ */
+  var _onFlashBridgeMouseMove = function(originalEvent) {
+    if (originalEvent._source === "zc" || !_currentElement) {
+      return;
+    }
+    var event = _extend({}, originalEvent, {
+      target: _currentElement,
+      _source2: "_onFlashBridgeMouseMove"
+    });
+    _stopAllPropagation(originalEvent);
+    if (_globalConfig.bubbleEvents === true) {
+      return _fireMouseEvent(event);
+    }
+  };
+  /**
+ * The `mousedown` handler for the Flash object's element.
+ * @private
+ */
+  var _onFlashBridgeMouseDown = function(originalEvent) {
+    if (originalEvent._source === "zc" || !_currentElement) {
+      return;
+    }
     _addClass(_currentElement, _globalConfig.activeClass);
-    return _onFlashBridgeGenericMouseEvent(event, _currentElement);
+    var event = _extend({}, originalEvent, {
+      target: _currentElement,
+      _source2: "_onFlashBridgeMouseDown"
+    });
+    _stopAllPropagation(originalEvent);
+    if (_globalConfig.bubbleEvents === true) {
+      return _fireMouseEvent(event);
+    }
   };
   /**
  * The `mouseup` handler for the Flash object's container element.
  * @private
  */
-  var _onFlashBridgeMouseUp = function(event) {
+  var _onFlashBridgeMouseUp = function(originalEvent) {
+    if (originalEvent._source === "zc" || !_currentElement) {
+      return;
+    }
     _removeClass(_currentElement, _globalConfig.activeClass);
+    var event = _extend({}, originalEvent, {
+      target: _currentElement,
+      _source2: "_onFlashBridgeMouseUp"
+    });
     _mouseupEventData = _omit(event, _mouseupEventPropsToExclude);
-    return _onFlashBridgeGenericMouseEvent(event, _currentElement);
-  };
-  /**
- * The `mouseout` (and `mouseleave`) handler for the Flash object's container element.
- * @private
- */
-  var _onFlashBridgeMouseOut = function(event) {
-    var returnVal, element = _currentElement, leavingFlash = !_containedBy(event.relatedTarget, event.currentTarget);
-    if (leavingFlash) {
-      ZeroClipboard.blur();
+    _stopAllPropagation(originalEvent);
+    if (_globalConfig.bubbleEvents === true) {
+      return _fireMouseEvent(event);
     }
-    if (leavingFlash && _globalConfig.bubbleEvents === true && element && !_containedBy(event.relatedTarget, element)) {
-      _fireMouseEvent(_extend({}, event, {
-        type: "mouseleave",
-        target: element,
-        bubbles: false,
-        cancelable: false
-      }));
-    }
-    returnVal = _onFlashBridgeGenericMouseEvent(event, element);
-    element = null;
-    return returnVal;
   };
   /**
  * Add MouseEvent handlers to the Flash object's element (Flash bridge).
  * @private
  */
   var _addSwfMouseEventHandlers = function(flashBridge) {
-    flashBridge.addEventListener("mouseover", _onFlashBridgeMouseOver, false);
-    flashBridge.addEventListener("mousemove", _onFlashBridgeGenericMouseEvent, false);
+    _window.addEventListener("mouseout", _onWindowMouseOverAndOut, true);
+    flashBridge.addEventListener("mouseover", _onFlashBridgeMouseEntryAndExit, false);
+    flashBridge.addEventListener("mousemove", _onFlashBridgeMouseMove, false);
     flashBridge.addEventListener("mousedown", _onFlashBridgeMouseDown, false);
     flashBridge.addEventListener("mouseup", _onFlashBridgeMouseUp, false);
-    flashBridge.addEventListener("mouseout", _onFlashBridgeMouseOut, false);
+    flashBridge.addEventListener("mouseout", _onFlashBridgeMouseEntryAndExit, false);
     flashBridge.addEventListener("click", _stopAllPropagation, false);
   };
   /**
@@ -1032,11 +1197,12 @@
  * @private
  */
   var _removeSwfMouseEventHandlers = function(flashBridge) {
-    flashBridge.removeEventListener("mouseover", _onFlashBridgeMouseOver, false);
-    flashBridge.removeEventListener("mousemove", _onFlashBridgeGenericMouseEvent, false);
+    _window.removeEventListener("mouseout", _onWindowMouseOverAndOut, true);
+    flashBridge.removeEventListener("mouseover", _onFlashBridgeMouseEntryAndExit, false);
+    flashBridge.removeEventListener("mousemove", _onFlashBridgeMouseMove, false);
     flashBridge.removeEventListener("mousedown", _onFlashBridgeMouseDown, false);
     flashBridge.removeEventListener("mouseup", _onFlashBridgeMouseUp, false);
-    flashBridge.removeEventListener("mouseout", _onFlashBridgeMouseOut, false);
+    flashBridge.removeEventListener("mouseout", _onFlashBridgeMouseEntryAndExit, false);
     flashBridge.removeEventListener("click", _stopAllPropagation, false);
   };
   /**
@@ -1084,8 +1250,8 @@
       container.appendChild(divToBeReplaced);
       _document.body.appendChild(container);
       var tmpDiv = _document.createElement("div");
-      var oldIE = _flashState.pluginType === "activex";
-      tmpDiv.innerHTML = '<object id="' + _globalConfig.swfObjectId + '" name="' + _globalConfig.swfObjectId + '" ' + 'width="100%" height="100%" ' + (oldIE ? 'classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"' : 'type="application/x-shockwave-flash" data="' + swfUrl + '"') + ">" + (oldIE ? '<param name="movie" value="' + swfUrl + '"/>' : "") + '<param name="allowScriptAccess" value="' + allowScriptAccess + '"/>' + '<param name="allowNetworking" value="' + allowNetworking + '"/>' + '<param name="menu" value="false"/>' + '<param name="wmode" value="transparent"/>' + '<param name="flashvars" value="' + flashvars + '"/>' + "</object>";
+      var usingActiveX = _flashState.pluginType === "activex";
+      tmpDiv.innerHTML = '<object id="' + _globalConfig.swfObjectId + '" name="' + _globalConfig.swfObjectId + '" ' + 'width="100%" height="100%" ' + (usingActiveX ? 'classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"' : 'type="application/x-shockwave-flash" data="' + swfUrl + '"') + ">" + (usingActiveX ? '<param name="movie" value="' + swfUrl + '"/>' : "") + '<param name="allowScriptAccess" value="' + allowScriptAccess + '"/>' + '<param name="allowNetworking" value="' + allowNetworking + '"/>' + '<param name="menu" value="false"/>' + '<param name="wmode" value="transparent"/>' + '<param name="flashvars" value="' + flashvars + '"/>' + "</object>";
       flashBridge = tmpDiv.firstChild;
       tmpDiv = null;
       _unwrap(flashBridge).ZeroClipboard = ZeroClipboard;
@@ -1833,10 +1999,9 @@
  */
   var _elementMeta = {};
   /**
- * Temporarily keep track of the last clipped element that was `mouseover`-ed to dedupe `mouseover` events.
- * @private
+ * Keep track of the previously activated clipped element for some special situations.
  */
-  var _lastMouseoverEl;
+  var _lastActivatedTarget;
   /**
  * Extending the ZeroClipboard configuration defaults for the Client module.
  */
@@ -2128,27 +2293,41 @@
     return typeof elements.length !== "number" ? [ elements ] : elements;
   };
   /**
- * The `mouseover` handler function to automatically activate clipped elements.
+ * Stop all propagation of an event, both immediate and bubbling, AND prevent the default action.
+ * @private
+ */
+  var _terminateEvent = function(event) {
+    if (event) {
+      _stopAllPropagation(event);
+      event.preventDefault();
+    }
+  };
+  /**
+ * The `mouseenter`/`mouseover` handler function to automatically focus/activate clipped elements.
  * @private
  */
   var _onElementMouseOver = function(event) {
-    if (event._source !== "zc") {
-      _lastMouseoverEl = event.currentTarget;
-    }
     ZeroClipboard.focus(event.currentTarget);
+    _debugUtilEventDump("_onElementMouseOver @ " + _getElementIdentifier(event.currentTarget), event);
+    if (event && event._source !== "zc") {
+      var htmlBridge = _getHtmlBridge(_flashState.bridge), relatedTargetIsInHtmlBridge = event.relatedTarget && _containedBy(event.relatedTarget, htmlBridge);
+      _terminateEvent(event);
+      return _synthesizeMouseEntryAndExit(_extend({}, event, {
+        type: "mouseover",
+        target: _currentElement,
+        relatedTarget: relatedTargetIsInHtmlBridge && _lastActivatedTarget != null ? _lastActivatedTarget : event.relatedTarget,
+        _source2: "_onElementMouseOver synthesis of mouseover"
+      }));
+    }
   };
   /**
- *
+ * 
  * @private
  */
-  var _maybeSuppressMouseover = function(event) {
-    if (event._source === "zc" && _lastMouseoverEl && event.currentTarget === _lastMouseoverEl) {
-      if (event.type === "mouseover") {
-        _lastMouseoverEl = null;
-      }
-      event.stopImmediatePropagation();
-      event.stopPropagation();
-      event.preventDefault();
+  var _maybeSuppressMouseEnter = function(event) {
+    _debugUtilEventDump("_maybeSuppressMouseEnter, " + event.type + " @ " + _getElementIdentifier(event.currentTarget) + " -- " + (event && event._source !== "zc" ? "terminating" : "allowing"), event);
+    if (event && event._source !== "zc") {
+      _stopAllPropagation(event);
     }
   };
   /**
@@ -2156,10 +2335,21 @@
  * @private
  */
   var _suppressMouseEvent = function(event) {
-    if (event._source !== "zc") {
-      event.stopImmediatePropagation();
-      event.stopPropagation();
-      event.preventDefault();
+    _debugUtilEventDump("_suppressMouseEvent, " + event.type + " @ " + _getElementIdentifier(event.currentTarget) + " -- " + (event && event._source !== "zc" ? "terminating" : "allowing"), event);
+    if (event && event._source !== "zc") {
+      _terminateEvent(event);
+    }
+  };
+  /**
+ * The `mouseout` handler function to automatically blur/deactivate clipped elements.
+ * @private
+ */
+  var _onElementMouseOut = function(event) {
+    _debugUtilEventDump("_onElementMouseOut, " + event.type + " @ " + _getElementIdentifier(event.currentTarget), event);
+    if (event && event._source === "zc" && event.currentTarget === _currentElement) {
+      _lastActivatedTarget = _currentElement;
+      _window.console.log("_onElementMouseOut (zc), blurring!");
+      ZeroClipboard.blur();
     }
   };
   /**
@@ -2170,15 +2360,22 @@
  */
   var _addMouseHandlers = function(element) {
     if (element && element.nodeType === 1) {
+      if (_supportsMouseEnterAndMouseLeave) {
+        element.addEventListener("mouseenter", _maybeSuppressMouseEnter, false);
+      }
       element.addEventListener("mouseover", _onElementMouseOver, false);
-      element.addEventListener("mouseenter", _maybeSuppressMouseover, false);
-      element.addEventListener("mouseover", _maybeSuppressMouseover, false);
       element.addEventListener("mousemove", _suppressMouseEvent, false);
       element.addEventListener("mousedown", _suppressMouseEvent, false);
       element.addEventListener("mouseup", _suppressMouseEvent, false);
       element.addEventListener("click", _suppressMouseEvent, false);
-      element.addEventListener("mouseleave", _suppressMouseEvent, false);
+      if (_supportsMouseEnterAndMouseLeave) {
+        element.addEventListener("mouseleave", _suppressMouseEvent, false);
+      }
       element.addEventListener("mouseout", _suppressMouseEvent, false);
+      if (_supportsMouseEnterAndMouseLeave) {
+        element.addEventListener("mouseleave", _onElementMouseOut, false);
+      }
+      element.addEventListener("mouseout", _onElementMouseOut, false);
     }
   };
   /**
@@ -2189,15 +2386,22 @@
  */
   var _removeMouseHandlers = function(element) {
     if (element && element.nodeType === 1) {
+      if (_supportsMouseEnterAndMouseLeave) {
+        element.removeEventListener("mouseenter", _maybeSuppressMouseEnter, false);
+      }
       element.removeEventListener("mouseover", _onElementMouseOver, false);
-      element.removeEventListener("mouseenter", _maybeSuppressMouseover, false);
-      element.removeEventListener("mouseover", _maybeSuppressMouseover, false);
       element.removeEventListener("mousemove", _suppressMouseEvent, false);
       element.removeEventListener("mousedown", _suppressMouseEvent, false);
       element.removeEventListener("mouseup", _suppressMouseEvent, false);
       element.removeEventListener("click", _suppressMouseEvent, false);
-      element.removeEventListener("mouseleave", _suppressMouseEvent, false);
+      if (_supportsMouseEnterAndMouseLeave) {
+        element.removeEventListener("mouseleave", _suppressMouseEvent, false);
+      }
       element.removeEventListener("mouseout", _suppressMouseEvent, false);
+      if (_supportsMouseEnterAndMouseLeave) {
+        element.removeEventListener("mouseleave", _onElementMouseOut, false);
+      }
+      element.removeEventListener("mouseout", _onElementMouseOut, false);
     }
   };
   /**

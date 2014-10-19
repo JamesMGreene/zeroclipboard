@@ -33,11 +33,9 @@ var _elementMeta = {};
 
 
 /**
- * Temporarily keep track of the last clipped element that was `mouseover`-ed to dedupe `mouseover` events.
- * @private
+ * Keep track of the previously activated clipped element for some special situations.
  */
-var _lastMouseoverEl;
-
+var _lastActivatedTarget;
 
 /**
  * Extending the ZeroClipboard configuration defaults for the Client module.

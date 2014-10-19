@@ -516,7 +516,7 @@ var _createEvent = function(event) {
     event = _mapClipResultsFromFlash(event, _clipDataFormatMap);
   }
 
-  if (event.target && !event.relatedTarget) {
+  if (/^(?:before|after)?copy$/.test(event.type) && event.target && !event.relatedTarget) {
     event.relatedTarget = _getRelatedTarget(event.target);
   }
 
@@ -756,83 +756,300 @@ var _fireMouseEvent = function(event) {
   // Create and fire the MouseEvent
   e = _createMouseEvent(args);
 
+  // TODO: Review the truth of the following statement:
   // This does not seem to work in Mac OS X Firefox 31.0 when created via `document.createEvent`.
   // Perhaps the Event object instance is immutable for external consumers?
-  _extend(e, { _source: "zc" });
+  _extend(e, {
+    _source: "zc",
+    _source2: event._source2
+  });
+
+//
+// TODO: Remove after debugging
+//
+if (e.type !== "mousemove") {
+_debugUtilEventDump("ZC.Core _fireMouseEvent", _extend({}, e, { target: target }));
+}
 
   target.dispatchEvent(e);
 };
 
 
 /**
- * Stop all propagation of an event, both immediate and bubbling, but allow the default action.
+ * Given a pending `mouseover`/`mouseout` event: fire a corresponding
+ * `mouseenter`/`mouseleave` event, if appropriate; then fire pending event.
  * @private
  */
-var _stopAllPropagation = function(event) {
-  event.stopImmediatePropagation();
-  event.stopPropagation();
+var _synthesizeMouseEntryAndExit = function(event) {
+  var supplementalType =
+    event.type === "mouseover" ?
+      "mouseenter" :
+      (
+        event.type === "mouseout" ?
+          "mouseleave"
+          : null
+      );
+
+  if (supplementalType && _globalConfig.bubbleEvents === true) {
+    if (_supportsMouseEnterAndMouseLeave && !_containedBy(event.relatedTarget, event.target)) {
+      _fireMouseEvent(
+        _extend({}, event, {
+          type: supplementalType,
+          bubbles: false,
+          cancelable: false
+        })
+      );
+    }
+
+    // Refire the pending event
+    return _fireMouseEvent(event);
+  }
 };
 
 
 /**
- * The generic MouseEvent handler for the Flash object's container element.
- * Refires the event, targeting the underlying clipped element instead.
+ * Track the relevant targets of all window-level "mouseout" events.
  * @private
  */
-var _onFlashBridgeGenericMouseEvent = function(event, element) {
-  element = element || _currentElement || event.target;
-  if (_globalConfig.bubbleEvents === true && element) {
-    _fireMouseEvent(_extend({}, event, { target: element }));
+var _onWindowMouseOverAndOut = function(event) {
+  // Don't track events synthesized by ZeroClipboard
+  if (event && event._source === "zc") {
+    return;
   }
 
-  // Immediately stop all propagation (bubbling) of an event but allow the default action to occur
-  _stopAllPropagation(event);
-};
+  // Don't track events if ZeroClipboard's event bubbling is disabled
+  if (_globalConfig.bubbleEvents !== true) {
+    return;
+  }
 
 
-/**
- * The `mouseover` (and `mouseenter`) handler for the Flash object's container element.
- * @private
- */
-var _onFlashBridgeMouseOver = function(event) {
-  var element;
-  if (_currentElement) {
-    element = _currentElement;
+//
+// TODO: Remove after debugging
+//
+_debugUtilEventDump("window " + event.type + " capture", event);
 
-    // Set this as the new currently active element
-    ZeroClipboard.focus(element);
+  var eventType = event.type,
+      isMouseover = eventType === "mouseover",
+      isMouseout = eventType === "mouseout",
+      //
+      // TODO: Remove this?
+      //
+      //previouslyTrackedEl = _mouseTracking[eventType] || null,
+      relevantTargetProp = isMouseover ? "target" : (isMouseout ? "relatedTarget" : null),
+      oppositeTargetProp = isMouseover ? "relatedTarget" : (isMouseout ? "target" : null),
+      relevantTarget = relevantTargetProp ? event[relevantTargetProp] : null,
+      oppositeTarget = oppositeTargetProp ? event[oppositeTargetProp] : null,
+      htmlBridge = _getHtmlBridge(_flashState.bridge),
+      modifiedEventTarget = {},
+      relevantTargetIsInCurrentElement = _containedBy(relevantTarget, _currentElement),
+      relevantTargetIsInHtmlBridge = _containedBy(relevantTarget, htmlBridge),
+      oppositeTargetIsInCurrentElement = _containedBy(oppositeTarget, _currentElement),
+      oppositeTargetIsInHtmlBridge = _containedBy(oppositeTarget, htmlBridge);
 
-    if (_globalConfig.bubbleEvents === true) {
-      // If the mouse is NOT coming from outside of the Flash object's container element
-      if (!_containedBy(event.relatedTarget, event.currentTarget)) {
-        // Fire a `mouseenter` event, if appropriate, targeting the underlying clipped element
-        _fireMouseEvent(
-          _extend({}, event, {
-            type: "mouseenter",
-            target: element,
-            bubbles: false,
-            cancelable: false
-          })
-        );
-      }
+  // Bail if ZeroClipboard isn't hooked up yet or if the event is invalid
+  if (!htmlBridge || !relevantTarget) {
+    return;
+  }
+
+  if (_currentElement && oppositeTarget) {
+
+    // Stop propagation on any `mouseover`/`mouseout` events that are just bouncing
+    // between the `_currentElement` and the various ZeroClipboard elements
+    if (
+      (relevantTargetIsInCurrentElement || relevantTargetIsInHtmlBridge) && 
+      (oppositeTargetIsInCurrentElement || oppositeTargetIsInHtmlBridge)
+    ) {
+//
+// TODO: Remove after debugging
+//
+_debugUtilEventDump("Global stopProp1", event);
+
+      _stopAllPropagation(event);
+      return;
+    }
+
+    // Stop propagation on any `mouseover`/`mouseout` events where the new/future target is neither
+    // the `_currentElement` nor any of the various ZeroClipboard elements but the other target is
+    // one of the various ZeroClipboard elements (but not the `_currentElement`), then re-fire the
+    // event after changing the other target to `_currentElement`
+    if (
+      !relevantTargetIsInCurrentElement &&
+      !relevantTargetIsInHtmlBridge &&
+      !oppositeTargetIsInCurrentElement &&
+      oppositeTargetIsInHtmlBridge &&
+      event._source !== "zc"
+    ) {
+//
+// TODO: Remove after debugging
+//
+_debugUtilEventDump("Global stopProp2, preventDefault, and refire", event);
+
+      _stopAllPropagation(event);
+      event.preventDefault();
+
+      modifiedEventTarget[oppositeTargetProp] = _currentElement;
+      modifiedEventTarget._source2 = "_onWindowMouseOverAndOut synthesis of " + event.type;
+
+      return _synthesizeMouseEntryAndExit(_extend({}, event, modifiedEventTarget));
     }
   }
 
-  // Refire the event, targeting the underlying clipped element
-  return _onFlashBridgeGenericMouseEvent(event, element);
+  // Only care about events with all of the correct targets
+  if (
+    !relevantTargetIsInCurrentElement &&
+    !relevantTargetIsInHtmlBridge &&
+    (
+      !oppositeTarget ||
+      !_currentElement ||
+      oppositeTargetIsInCurrentElement ||
+      oppositeTargetIsInHtmlBridge
+    )
+  ) {
+
+//
+// TODO: Remove after debugging
+//
+_debugUtilEventDump("Global all the correct targets", event);
+  
+    _mouseTracking[eventType] = {
+      relevantTarget: relevantTarget,
+      oppositeTarget: oppositeTarget,
+      target: _containedBy(event.target, htmlBridge) ? _currentElement : event.target,
+      relatedTarget: _containedBy(event.relatedTarget, htmlBridge) ? _currentElement : event.relatedTarget
+    };
+
+    //
+    // TODO: Remove this?
+    //
+    // Also stop all propagation if the relevant target element hasn't changed
+    //if (previouslyTrackedEl === _mouseTracking[event.type]) {
+    //  _stopAllPropagation(event);
+    //}
+  }
 };
 
 
 /**
- * The `mousedown` handler for the Flash object's container element.
+ * Get the best possible `relatedTarget` value for a ZeroClipboard-synthesized `mouseover`/`mouseout` event.
  * @private
  */
-var _onFlashBridgeMouseDown = function(event) {
+var _getRelatedTargetForMouseEntryAndExit = function(originalEvent) {
+  var relatedTarget = null,
+      htmlBridge = _getHtmlBridge(_flashState.bridge);
+
+  if (originalEvent && originalEvent.relatedTarget) {
+    if (
+      _containedBy(originalEvent.relatedTarget, _currentElement) ||
+      _containedBy(originalEvent.relatedTarget, htmlBridge)
+    ) {
+      // Mouse is likely moving around between the clipped element and various ZeroClipboard elements
+      relatedTarget = _currentElement;
+    }
+    else {
+      relatedTarget = originalEvent.relatedTarget;
+    }
+  }
+  else if (
+    _mouseTracking && _mouseTracking.mouseout && _mouseTracking.mouseout.target &&
+    !_containedBy(_mouseTracking.mouseout.target, _currentElement) &&
+    !_containedBy(_mouseTracking.mouseout.target, htmlBridge)
+  ) {
+    relatedTarget = _mouseTracking.mouseout.target;
+  }
+  else if (
+    _mouseTracking && _mouseTracking.mouseover && _mouseTracking.mouseover.relatedTarget &&
+    !_containedBy(_mouseTracking.mouseover.relatedTarget, _currentElement) &&
+    !_containedBy(_mouseTracking.mouseover.relatedTarget, htmlBridge)
+  ) {
+    relatedTarget = _mouseTracking.mouseover.relatedTarget;
+  }
+
+  return relatedTarget;
+};
+
+
+/**
+ * The `mouseenter`/`mouseover`/`mouseleave`/`mouseout` handler for the Flash object's element.
+ * @private
+ */
+var _onFlashBridgeMouseEntryAndExit = function(originalEvent) {
+//
+// TODO: Remove after debugging
+//
+_debugUtilEventDump("_onFlashBridgeMouseEntryAndExit", originalEvent);
+
+  // Bail out if the event was synthesized by ZeroClipboard or if there isn't an activated clipped element
+  if (originalEvent._source === "zc" || !_currentElement) {
+    return;
+  }
+
+  var event = _extend({}, originalEvent, {
+        target: _currentElement,
+        relatedTarget: _getRelatedTargetForMouseEntryAndExit(originalEvent),
+        _source2: "_onFlashBridgeMouseEntryAndExit synthesis of " + originalEvent.type
+      });
+
+  // If the last `mouseout` element tracked was within this same clipped element or the Flash container, bail out
+  if (!event.relatedTarget || event.target === event.relatedTarget) {
+    return;
+  }
+
+//
+// TODO: Remove after debugging
+//
+_debugUtilEventDump("_onFlashBridgeMouseEntryAndExit's new synthesized event", event);
+
+  // Immediately stop all propagation (bubbling) of the original event but allow the default action to occur
+  _stopAllPropagation(originalEvent);
+
+  return _synthesizeMouseEntryAndExit(event);
+};
+
+
+/**
+ * The `mousemove` handler for the Flash object's element.
+ * @private
+ */
+var _onFlashBridgeMouseMove = function(originalEvent) {
+  // Bail out if the event was synthesized by ZeroClipboard or if there isn't an activated clipped element
+  if (originalEvent._source === "zc" || !_currentElement) {
+    return;
+  }
+
+  var event = _extend({}, originalEvent, { target: _currentElement, _source2: "_onFlashBridgeMouseMove" });
+
+  // Immediately stop all propagation (bubbling) of the original event but allow the default action to occur
+  _stopAllPropagation(originalEvent);
+
+  // Refire the event, targeting the underlying clipped element
+  if (_globalConfig.bubbleEvents === true) {
+    return _fireMouseEvent(event);
+  }
+};
+
+
+/**
+ * The `mousedown` handler for the Flash object's element.
+ * @private
+ */
+var _onFlashBridgeMouseDown = function(originalEvent) {
+  // Bail out if the event was synthesized by ZeroClipboard or if there isn't an activated clipped element
+  if (originalEvent._source === "zc" || !_currentElement) {
+    return;
+  }
+
   // Ensure the currently activated element has the `activeClass` added to it
   _addClass(_currentElement, _globalConfig.activeClass);
 
+  var event = _extend({}, originalEvent, { target: _currentElement, _source2: "_onFlashBridgeMouseDown" });
+
+  // Immediately stop all propagation (bubbling) of the original event but allow the default action to occur
+  _stopAllPropagation(originalEvent);
+
   // Refire the event, targeting the underlying clipped element
-  return _onFlashBridgeGenericMouseEvent(event, _currentElement);
+  if (_globalConfig.bubbleEvents === true) {
+    return _fireMouseEvent(event);
+  }
 };
 
 
@@ -840,56 +1057,27 @@ var _onFlashBridgeMouseDown = function(event) {
  * The `mouseup` handler for the Flash object's container element.
  * @private
  */
-var _onFlashBridgeMouseUp = function(event) {
+var _onFlashBridgeMouseUp = function(originalEvent) {
+  // Bail out if the event was synthesized by ZeroClipboard or if there isn't an activated clipped element
+  if (originalEvent._source === "zc" || !_currentElement) {
+    return;
+  }
+
   // Ensure the currently activated element has the `activeClass` removed from it
   _removeClass(_currentElement, _globalConfig.activeClass);
+
+  var event = _extend({}, originalEvent, { target: _currentElement, _source2: "_onFlashBridgeMouseUp" });
 
   // Store `mouseup` event data to be used for `click` event regurgitation
   _mouseupEventData = _omit(event, _mouseupEventPropsToExclude);
 
-  // Refire the event, targeting the underlying clipped element
-  return _onFlashBridgeGenericMouseEvent(event, _currentElement);
-};
-
-
-/**
- * The `mouseout` (and `mouseleave`) handler for the Flash object's container element.
- * @private
- */
-var _onFlashBridgeMouseOut = function(event) {
-  var returnVal,
-      element = _currentElement,
-      // If the mouse IS moving outside of the Flash object's container element
-      leavingFlash = !_containedBy(event.relatedTarget, event.currentTarget);
-
-  if (leavingFlash) {
-    // If the mouse is moving to any other element, deactivate and...
-    ZeroClipboard.blur();
-  }
-
-  if (
-    leavingFlash &&
-    _globalConfig.bubbleEvents === true &&
-    // If the mouse IS moving outside of the clipped element
-    element && !_containedBy(event.relatedTarget, element)
-  ) {
-    // Fire a `mouseleave` event, if appropriate, targeting the underlying clipped element
-    _fireMouseEvent(
-      _extend({}, event, {
-        type: "mouseleave",
-        target: element,
-        bubbles: false,
-        cancelable: false
-      })
-    );
-  }
+  // Immediately stop all propagation (bubbling) of the original event but allow the default action to occur
+  _stopAllPropagation(originalEvent);
 
   // Refire the event, targeting the underlying clipped element
-  returnVal = _onFlashBridgeGenericMouseEvent(event, element);
-
-  element = null;
-
-  return returnVal;
+  if (_globalConfig.bubbleEvents === true) {
+    return _fireMouseEvent(event);
+  }
 };
 
 
@@ -898,11 +1086,14 @@ var _onFlashBridgeMouseOut = function(event) {
  * @private
  */
 var _addSwfMouseEventHandlers = function(flashBridge) {
-  flashBridge.addEventListener("mouseover", _onFlashBridgeMouseOver, false);
-  flashBridge.addEventListener("mousemove", _onFlashBridgeGenericMouseEvent, false);
+  //_window.addEventListener("mouseover", _onWindowMouseOverAndOut, true);
+  _window.addEventListener("mouseout", _onWindowMouseOverAndOut, true);
+
+  flashBridge.addEventListener("mouseover", _onFlashBridgeMouseEntryAndExit, false);
+  flashBridge.addEventListener("mousemove", _onFlashBridgeMouseMove, false);
   flashBridge.addEventListener("mousedown", _onFlashBridgeMouseDown, false);
   flashBridge.addEventListener("mouseup", _onFlashBridgeMouseUp, false);
-  flashBridge.addEventListener("mouseout", _onFlashBridgeMouseOut, false);
+  flashBridge.addEventListener("mouseout", _onFlashBridgeMouseEntryAndExit, false);
 
   // A few browsers actually allow the `click` event through to the DOM as well
   flashBridge.addEventListener("click", _stopAllPropagation, false);
@@ -914,11 +1105,14 @@ var _addSwfMouseEventHandlers = function(flashBridge) {
  * @private
  */
 var _removeSwfMouseEventHandlers = function(flashBridge) {
-  flashBridge.removeEventListener("mouseover", _onFlashBridgeMouseOver, false);
-  flashBridge.removeEventListener("mousemove", _onFlashBridgeGenericMouseEvent, false);
+  //_window.removeEventListener("mouseover", _onWindowMouseOverAndOut, true);
+  _window.removeEventListener("mouseout", _onWindowMouseOverAndOut, true);
+
+  flashBridge.removeEventListener("mouseover", _onFlashBridgeMouseEntryAndExit, false);
+  flashBridge.removeEventListener("mousemove", _onFlashBridgeMouseMove, false);
   flashBridge.removeEventListener("mousedown", _onFlashBridgeMouseDown, false);
   flashBridge.removeEventListener("mouseup", _onFlashBridgeMouseUp, false);
-  flashBridge.removeEventListener("mouseout", _onFlashBridgeMouseOut, false);
+  flashBridge.removeEventListener("mouseout", _onFlashBridgeMouseEntryAndExit, false);
 
   // A few browsers actually allow the `click` event through to the DOM as well
   flashBridge.removeEventListener("click", _stopAllPropagation, false);
@@ -996,14 +1190,14 @@ var _embedSwf = function() {
     // Hybrid of Flash Satay markup is from Ambience:
     //  - Flash Satay version:  http://alistapart.com/article/flashsatay
     //  - Ambience version:     http://www.ambience.sk/flash-valid.htm
-    var oldIE = _flashState.pluginType === "activex";
+    var usingActiveX = _flashState.pluginType === "activex";
     /*jshint quotmark:single */
     tmpDiv.innerHTML =
       '<object id="' + _globalConfig.swfObjectId + '" name="' + _globalConfig.swfObjectId + '" ' +
         'width="100%" height="100%" ' +
-        (oldIE ? 'classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"' : 'type="application/x-shockwave-flash" data="' + swfUrl + '"') +
+        (usingActiveX ? 'classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"' : 'type="application/x-shockwave-flash" data="' + swfUrl + '"') +
       '>' +
-        (oldIE ? '<param name="movie" value="' + swfUrl + '"/>' : '') +
+        (usingActiveX ? '<param name="movie" value="' + swfUrl + '"/>' : '') +
         '<param name="allowScriptAccess" value="' + allowScriptAccess + '"/>' +
         '<param name="allowNetworking" value="' + allowNetworking + '"/>' +
         '<param name="menu" value="false"/>' +
@@ -1058,13 +1252,13 @@ var _unembedSwf = function() {
       // Remove all relevant MouseEvent listeners from the Flash object's element
       _removeSwfMouseEventHandlers(flashBridge);
 
-      // Some extra caution is necessary to prevent Flash from causing memory leaks in oldIE
+      // Some extra caution is necessary to prevent Flash from causing memory leaks in older IEs' ActiveX
       // NOTE: Removing the SWF in IE may not be completed synchronously
       if (_flashState.pluginType === "activex" && "readyState" in flashBridge) {
         flashBridge.style.display = "none";
         (function removeSwfFromIE() {
           if (flashBridge.readyState === 4) {
-            // This step prevents memory leaks in oldIE
+            // This step prevents the memory leaks
             for (var prop in flashBridge) {
               if (typeof flashBridge[prop] === "function") {
                 flashBridge[prop] = null;

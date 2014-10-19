@@ -386,31 +386,56 @@ var _prepClip = function(elements) {
 
 
 /**
- * The `mouseover` handler function to automatically activate clipped elements.
+ * Stop all propagation of an event, both immediate and bubbling, AND prevent the default action.
  * @private
  */
-var _onElementMouseOver = function(event) {
-  if (event._source !== "zc") {
-    _lastMouseoverEl = event.currentTarget;
+var _terminateEvent = function(event) {
+  if (event) {
+    _stopAllPropagation(event);
+    event.preventDefault(); 
   }
-
-  // Set the element being listened to as the new currently active element
-  ZeroClipboard.focus(event.currentTarget);
 };
 
 
 /**
- *
+ * The `mouseenter`/`mouseover` handler function to automatically focus/activate clipped elements.
  * @private
  */
-var _maybeSuppressMouseover = function(event) {
-  if (event._source === "zc" && _lastMouseoverEl && event.currentTarget === _lastMouseoverEl) {
-    if (event.type === "mouseover") {
-      _lastMouseoverEl = null;
-    }
-    event.stopImmediatePropagation();
-    event.stopPropagation();
-    event.preventDefault();
+var _onElementMouseOver = function(event) {
+  // Set the element being listened to as the new currently active element
+  ZeroClipboard.focus(event.currentTarget);
+
+  _debugUtilEventDump("_onElementMouseOver @ " + _getElementIdentifier(event.currentTarget), event);
+  if (event && event._source !== "zc") {
+    var htmlBridge = _getHtmlBridge(_flashState.bridge),
+        relatedTargetIsInHtmlBridge = event.relatedTarget && _containedBy(event.relatedTarget, htmlBridge);
+
+    //_stopAllPropagation(event);
+    _terminateEvent(event);
+
+    return _synthesizeMouseEntryAndExit(
+      _extend({}, event, {
+        type: "mouseover",
+        target: _currentElement,
+        relatedTarget:
+          relatedTargetIsInHtmlBridge && _lastActivatedTarget != null ?
+            _lastActivatedTarget :
+            event.relatedTarget,
+        _source2: "_onElementMouseOver synthesis of mouseover"
+      })
+    );
+  }
+};
+
+
+/**
+ * 
+ * @private
+ */
+var _maybeSuppressMouseEnter = function(event) {
+  _debugUtilEventDump("_maybeSuppressMouseEnter, " + event.type + " @ " + _getElementIdentifier(event.currentTarget) + " -- " + (event && event._source !== "zc" ? "terminating" : "allowing"), event);
+  if (event && event._source !== "zc") {
+    _stopAllPropagation(event);
   }
 };
 
@@ -420,13 +445,29 @@ var _maybeSuppressMouseover = function(event) {
  * @private
  */
 var _suppressMouseEvent = function(event) {
-  if (event._source !== "zc") {
-    event.stopImmediatePropagation();
-    event.stopPropagation();
-    event.preventDefault();
+  _debugUtilEventDump("_suppressMouseEvent, " + event.type + " @ " + _getElementIdentifier(event.currentTarget) + " -- " + (event && event._source !== "zc" ? "terminating" : "allowing"), event);
+  if (event && event._source !== "zc") {
+    _terminateEvent(event);
   }
 };
 
+
+/**
+ * The `mouseout` handler function to automatically blur/deactivate clipped elements.
+ * @private
+ */
+var _onElementMouseOut = function(event) {
+  _debugUtilEventDump("_onElementMouseOut, " + event.type + " @ " + _getElementIdentifier(event.currentTarget), event);
+  if (event && event._source === "zc" && event.currentTarget === _currentElement) {
+
+    // Keep track of this clipped element in case the next element is also a clipped one
+    _lastActivatedTarget = _currentElement;
+
+_window.console.log("_onElementMouseOut (zc), blurring!");
+
+    ZeroClipboard.blur();
+  }
+};
 
 /**
  * Adds mouse handler functions for a clipped element.
@@ -436,18 +477,27 @@ var _suppressMouseEvent = function(event) {
  */
 var _addMouseHandlers = function(element) {
   if (element && element.nodeType === 1) {
-    // Add the important handler that focuses ZeroClipboard over the clipped element
+    // Add the important handler that focuses ZeroClipboard over the clipped element FIRST
+    if (_supportsMouseEnterAndMouseLeave) {
+      element.addEventListener("mouseenter", _maybeSuppressMouseEnter, false);
+    }
     element.addEventListener("mouseover", _onElementMouseOver, false);
 
     // Add other mouse event handlers to suppress unapproved events
-    element.addEventListener("mouseenter", _maybeSuppressMouseover, false);
-    element.addEventListener("mouseover", _maybeSuppressMouseover, false);
     element.addEventListener("mousemove", _suppressMouseEvent, false);
     element.addEventListener("mousedown", _suppressMouseEvent, false);
     element.addEventListener("mouseup", _suppressMouseEvent, false);
     element.addEventListener("click", _suppressMouseEvent, false);
-    element.addEventListener("mouseleave", _suppressMouseEvent, false);
+    if (_supportsMouseEnterAndMouseLeave) {
+      element.addEventListener("mouseleave", _suppressMouseEvent, false);
+    }
     element.addEventListener("mouseout", _suppressMouseEvent, false);
+
+    // Add the important handler that blurs ZeroClipboard from the clipped element LAST
+    if (_supportsMouseEnterAndMouseLeave) {
+      element.addEventListener("mouseleave", _onElementMouseOut, false);
+    }
+    element.addEventListener("mouseout", _onElementMouseOut, false);
   }
 };
 
@@ -460,17 +510,26 @@ var _addMouseHandlers = function(element) {
  */
 var _removeMouseHandlers = function(element) {
   if (element && element.nodeType === 1) {
-    // Remove the important handler that focuses ZeroClipboard over the clipped element
+    // Remove the important handler that focuses ZeroClipboard over the clipped element FIRST
+    if (_supportsMouseEnterAndMouseLeave) {
+      element.removeEventListener("mouseenter", _maybeSuppressMouseEnter, false);
+    }
     element.removeEventListener("mouseover", _onElementMouseOver, false);
 
     // Add other mouse event handlers to suppress unapproved events
-    element.removeEventListener("mouseenter", _maybeSuppressMouseover, false);
-    element.removeEventListener("mouseover", _maybeSuppressMouseover, false);
     element.removeEventListener("mousemove", _suppressMouseEvent, false);
     element.removeEventListener("mousedown", _suppressMouseEvent, false);
     element.removeEventListener("mouseup", _suppressMouseEvent, false);
     element.removeEventListener("click", _suppressMouseEvent, false);
-    element.removeEventListener("mouseleave", _suppressMouseEvent, false);
+    if (_supportsMouseEnterAndMouseLeave) {
+      element.removeEventListener("mouseleave", _suppressMouseEvent, false);
+    }
     element.removeEventListener("mouseout", _suppressMouseEvent, false);
+
+    // Remove the important handler that blurs ZeroClipboard from the clipped element LAST
+    if (_supportsMouseEnterAndMouseLeave) {
+      element.removeEventListener("mouseleave", _onElementMouseOut, false);
+    }
+    element.removeEventListener("mouseout", _onElementMouseOut, false);
   }
 };
