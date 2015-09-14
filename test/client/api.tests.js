@@ -5,6 +5,15 @@
 
   var originalFlashState, originalConfig, originalFlashDetect, originalSandboxDetect;
 
+  function beReady() {
+    _flashState.sandboxed = false;
+    _flashState.disabled = false;
+    _flashState.outdated = false;
+    _flashState.deactivated = false;
+    _flashState.unavailable = false;
+    _flashState.degraded = false;
+    _flashState.version = "11.9.0";
+  }
 
   module("client/api.js unit tests - constructor and bridge", {
     setup: function() {
@@ -790,10 +799,397 @@
   });
 
 
+  test("Core emission: An early-add `ready` event handler is dispatched after emitting `ready`", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+
+    var client = new ZeroClipboard();
+
+    client.on("ready", function(/* e */) {
+      assert.ok(true, "A `ready` event handler is dispatched");
+      done();
+
+      client.off();  // Remove all handlers for all types
+    });
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    beReady();
+    ZeroClipboard.emit("ready");
+  });
+
+
+  test("Core emission: A late-add `ready` event handler is dispatched immediately upon being added may result in duplicate emissions", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+
+    var client = new ZeroClipboard();
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    beReady();
+    ZeroClipboard.emit("ready");
+
+    // Adding this handler will cause the "ready" event to be re-emitted
+    // Will this result in the handler being invoked twice? Ideally not!
+    client.on("ready", function(/* e */) {
+      assert.ok(true, "A `ready` event handler is dispatched");
+      done();
+    });
+  });
+
+
+  test("Core emission: A late-add `ready` event handler is dispatched immediately upon being added", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+
+    var client = new ZeroClipboard();
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    beReady();
+    ZeroClipboard.emit("ready");
+
+    // Delay adding the handler to prove that it is not just coincidental lateness
+    setTimeout(function() {
+
+      client.on("ready", function(/* e */) {
+        assert.ok(true, "A `ready` event handler is dispatched");
+        done();
+
+        client.off();  // Remove all handlers for all types
+      });
+
+    }, 250);
+  });
+
+
+  test("Core emission: A late-add `ready` event handler is dispatched immediately upon being added BUT early-add listeners are not re-dispatched", function(assert) {
+    assert.expect(4);
+
+    // Arrange
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+
+    var done1 = assert.async(),
+        done2 = assert.async();
+    var step = 0;
+    var client = new ZeroClipboard();
+
+    client.on("ready", function(/* e */) {
+      assert.strictEqual(++step, 3, "An early-add `ready` event handler is dispatched");
+      done1();
+
+      // Delay adding the handler to prove that it is not just coincidental lateness
+      setTimeout(function() {
+
+        client.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 4, "A late-add `ready` event handler is dispatched immediately");
+          done2();
+
+          client.off();  // Remove all handlers for all types
+        });
+
+      }, 250);
+    });
+
+    assert.strictEqual(++step, 1, "Before emitting...");
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    beReady();
+    ZeroClipboard.emit("ready");
+
+    assert.strictEqual(++step, 2, "After emitting...");
+  });
+
+
+  test("Core emission: Each late-add `ready` event handler of multiple is only dispatched once", function(assert) {
+    assert.expect(5);
+
+    // Arrange
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+
+    var done1 = assert.async(),
+        done2 = assert.async(),
+        done3 = assert.async();
+    var step = 0;
+    var client = new ZeroClipboard();
+
+    client.on("ready", function(/* e */) {
+      assert.strictEqual(++step, 3, "An early-add `ready` event handler is dispatched");
+      done1();
+
+      // Delay adding the handlers to prove that it is not just coincidental lateness
+      setTimeout(function() {
+
+        client.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 4, "A first late-add `ready` event handler is dispatched immediately (and not redispatched)");
+          done2();
+        });
+
+        client.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 5, "A first late-add `ready` event handler is dispatched immediately");
+          done3();
+
+          client.off();  // Remove all handlers for all types
+        });
+
+      }, 250);
+    });
+
+    assert.strictEqual(++step, 1, "Before emitting...");
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    beReady();
+    ZeroClipboard.emit("ready");
+
+    assert.strictEqual(++step, 2, "After emitting...");
+  });
+
+
+  test("Client emission: An early-add `ready` event handler is dispatched after emitting `ready`", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+    beReady();
+
+    var client = new ZeroClipboard();
+    var currentEl = document.getElementById("d_clip_button");
+    client.clip(currentEl);
+
+    client.on("ready", function(/* e */) {
+      assert.ok(true, "A `ready` event handler is dispatched");
+
+      client.off();  // Remove all handlers for all types
+
+      done();
+    });
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    _flashState.ready = true;
+    _flashState.bridge = {};
+    client.emit({ type: "ready" });
+  });
+
+
+  test("Client emission: A late-add `ready` event handler is dispatched immediately upon being added may result in duplicate emissions", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+    beReady();
+    _flashState.ready = true;
+    _flashState.bridge = {};
+
+    var client = new ZeroClipboard();
+    var currentEl = document.getElementById("d_clip_button");
+    client.clip(currentEl);
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    client.emit({ type: "ready" });
+
+    // Adding this handler will cause the "ready" event to be re-emitted
+    // Will this result in the handler being invoked twice? Ideally not!
+    client.on("ready", function(/* e */) {
+      assert.ok(true, "A `ready` event handler is dispatched");
+      done();
+    });
+  });
+
+
+  test("Client emission: A late-add `ready` event handler is dispatched immediately upon being added", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+    beReady();
+    _flashState.ready = true;
+    _flashState.bridge = {};
+
+    var client = new ZeroClipboard();
+    var currentEl = document.getElementById("d_clip_button");
+    client.clip(currentEl);
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    client.emit({ type: "ready" });
+
+    // Delay adding the handler to prove that it is not just coincidental lateness
+    setTimeout(function() {
+
+      client.on("ready", function(/* e */) {
+        assert.ok(true, "A `ready` event handler is dispatched");
+        done();
+
+        client.off();  // Remove all handlers for all types
+      });
+
+    }, 250);
+  });
+
+
+  test("Client emission: A late-add `ready` event handler is dispatched immediately upon being added BUT early-add listeners are not re-dispatched", function(assert) {
+    assert.expect(4);
+
+    // Arrange
+    var done1 = assert.async(),
+        done2 = assert.async();
+    var step = 0;
+
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+    beReady();
+    _flashState.ready = true;
+    _flashState.bridge = {};
+
+    var client = new ZeroClipboard();
+    var currentEl = document.getElementById("d_clip_button");
+    client.clip(currentEl);
+
+    client.on("ready", function(/* e */) {
+      assert.strictEqual(++step, 3, "An early-add `ready` event handler is dispatched");
+      done1();
+
+      // Delay adding the handler to prove that it is not just coincidental lateness
+      setTimeout(function() {
+
+        client.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 4, "A late-add `ready` event handler is dispatched immediately");
+          done2();
+
+          client.off();  // Remove all handlers for all types
+        });
+
+      }, 250);
+    });
+
+    assert.strictEqual(++step, 1, "Before emitting...");
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    client.emit({ type: "ready" });
+
+    assert.strictEqual(++step, 2, "After emitting...");
+  });
+
+
+  test("Client emission: Each late-add `ready` event handler of multiple is only dispatched once", function(assert) {
+    assert.expect(5);
+
+    // Arrange
+    var done1 = assert.async(),
+        done2 = assert.async(),
+        done3 = assert.async();
+    ZeroClipboard.isFlashUnusable = function() {
+      return false;
+    };
+    beReady();
+    _flashState.ready = true;
+    _flashState.bridge = {};
+
+    var step = 0;
+    var client = new ZeroClipboard();
+    var currentEl = document.getElementById("d_clip_button");
+    client.clip(currentEl);
+
+    client.on("ready", function(/* e */) {
+      assert.strictEqual(++step, 3, "An early-add `ready` event handler is dispatched");
+      done1();
+
+      // Delay adding the handlers to prove that it is not just coincidental lateness
+      setTimeout(function() {
+
+        client.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 4, "A first late-add `ready` event handler is dispatched immediately (and not redispatched)");
+          done2();
+        });
+
+        client.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 5, "A first late-add `ready` event handler is dispatched immediately");
+          done3();
+
+          client.off();  // Remove all handlers for all types
+        });
+
+      }, 250);
+    });
+
+    assert.strictEqual(++step, 1, "Before emitting...");
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    client.emit({ type: "ready" });
+
+    assert.strictEqual(++step, 2, "After emitting...");
+  });
+
+
+  test("Test sandboxedFlash Event", function(assert) {
+    assert.expect(6);
+
+    // Arrange
+    _flashState.sandboxed = true;
+    var client = new ZeroClipboard();
+    var id = client.id;
+    var currentEl = document.getElementById("d_clip_button");
+
+    // Act
+    client.on( "ready", function(/* event */) {
+      assert.ok(false, "The `ready` event should NOT have fired!");
+    } );
+    client.on( "error", function(event) {
+      // Assert
+      assert.strictEqual(this, client);
+      assert.strictEqual(this.id, id);
+      assert.strictEqual(_flashState.sandboxed, true);
+      assert.strictEqual(event.type, "error");
+      assert.strictEqual(event.name, "flash-sandboxed");
+      assert.strictEqual(event.target, null);
+      QUnit.start();
+    } );
+    QUnit.stop();
+    client.clip(currentEl);
+  });
+
+
   test("Test disabledFlash Event", function(assert) {
     assert.expect(6);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = true;
     var client = new ZeroClipboard();
     var id = client.id;
@@ -817,6 +1213,7 @@
     assert.expect(8);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = true;
     _flashState.version = "10.0.0";
@@ -843,46 +1240,13 @@
   });
 
 
-  test("Test sandboxedFlash Event", function(assert) {
-    assert.expect(8);
-
-    // Arrange
-    _flashState.disabled = false;
-    _flashState.outdated = false;
-    _flashState.sandboxed = true;
-    _flashState.version = "11.0.0";
-    var client = new ZeroClipboard();
-    var id = client.id;
-    var currentEl = document.getElementById("d_clip_button");
-
-    // Act
-    client.on( "ready", function(/* event */) {
-      assert.ok(false, "The `ready` event should NOT have fired!");
-    } );
-    client.on( "error", function(event) {
-      // Assert
-      assert.strictEqual(this, client);
-      assert.strictEqual(this.id, id);
-      assert.strictEqual(_flashState.sandboxed, true);
-      assert.strictEqual(event.type, "error");
-      assert.strictEqual(event.name, "flash-sandboxed");
-      assert.strictEqual(event.target, null);
-      assert.strictEqual(event.version, "11.0.0");
-      assert.strictEqual(event.minimumVersion, "11.0.0");
-      QUnit.start();
-    } );
-    QUnit.stop();
-    client.clip(currentEl);
-  });
-
-
   test("Test deactivatedFlash Event", function(assert) {
     assert.expect(10);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
     _flashState.version = "11.0.0";
@@ -919,9 +1283,9 @@
     assert.expect(8);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = true;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -954,9 +1318,9 @@
     assert.expect(9);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.version = "11.0.0";
@@ -989,9 +1353,9 @@
     assert.expect(10);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -1026,9 +1390,9 @@
     assert.expect(11);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -1071,9 +1435,9 @@
     assert.expect(11);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -1113,9 +1477,9 @@
     assert.expect(6);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -1145,9 +1509,9 @@
     assert.expect(6);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -1176,9 +1540,9 @@
     assert.expect(15);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
     _flashState.version = "11.0.0";
@@ -1226,9 +1590,9 @@
     assert.expect(8);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;
@@ -1323,9 +1687,9 @@
     assert.expect(4);
 
     // Arrange
+    _flashState.sandboxed = false;
     _flashState.disabled = false;
     _flashState.outdated = false;
-    _flashState.sandboxed = false;
     _flashState.deactivated = false;
     _flashState.unavailable = false;
     _flashState.degraded = false;

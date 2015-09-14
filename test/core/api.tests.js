@@ -506,4 +506,157 @@
     assert.strictEqual(/^-?[0-9\.]+px$/.test(TestUtils.getHtmlBridge().style.height), true);
   });
 
+
+  module("core/api.js unit tests - event", {
+    setup: function() {
+      // Store
+      originalFlashDetect = ZeroClipboard.isFlashUnusable;
+      // Modify
+      ZeroClipboard.isFlashUnusable = function() {
+        return false;
+      };
+    },
+    teardown: function() {
+      // Restore
+      ZeroClipboard.isFlashUnusable = originalFlashDetect;
+      ZeroClipboard.destroy();
+    }
+  });
+
+
+  test("An early-add `ready` event handler is dispatched after emitting `ready`", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.create();
+
+    ZeroClipboard.on("ready", function(/* e */) {
+      assert.ok(true, "A `ready` event handler is dispatched");
+      done();
+    });
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    ZeroClipboard.emit("ready");
+  });
+
+
+  test("A late-add `ready` event handler is dispatched immediately upon being added may result in duplicate emissions", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.create();
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    ZeroClipboard.emit("ready");
+
+    // Adding this handler will cause the "ready" event to be re-emitted
+    // Will this result in the handler being invoked twice? Ideally not!
+    ZeroClipboard.on("ready", function(/* e */) {
+      assert.ok(true, "A `ready` event handler is dispatched");
+      done();
+    });
+  });
+
+
+  test("A late-add `ready` event handler is dispatched immediately upon being added", function(assert) {
+    assert.expect(1);
+
+    // Arrange
+    var done = assert.async();
+    ZeroClipboard.create();
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    ZeroClipboard.emit("ready");
+
+    // Delay adding the handler to prove that it is not just coincidental lateness
+    setTimeout(function() {
+
+      ZeroClipboard.on("ready", function(/* e */) {
+        assert.ok(true, "A `ready` event handler is dispatched");
+        done();
+      });
+
+    }, 250);
+  });
+
+
+  test("A late-add `ready` event handler is dispatched immediately upon being added BUT early-add listeners are not re-dispatched", function(assert) {
+    assert.expect(4);
+
+    // Arrange
+    var done1 = assert.async(),
+        done2 = assert.async();
+    var step = 0;
+    ZeroClipboard.create();
+
+    ZeroClipboard.on("ready", function(/* e */) {
+      assert.strictEqual(++step, 3, "An early-add `ready` event handler is dispatched");
+      done1();
+
+      // Delay adding the handler to prove that it is not just coincidental lateness
+      setTimeout(function() {
+
+        ZeroClipboard.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 4, "A late-add `ready` event handler is dispatched immediately");
+          done2();
+        });
+
+      }, 250);
+    });
+
+    assert.strictEqual(++step, 1, "Before emitting...");
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    ZeroClipboard.emit("ready");
+
+    assert.strictEqual(++step, 2, "After emitting...");
+  });
+
+
+  test("Each late-add `ready` event handler of multiple is only dispatched once", function(assert) {
+    assert.expect(5);
+
+    // Arrange
+    var done1 = assert.async(),
+        done2 = assert.async(),
+        done3 = assert.async();
+    var step = 0;
+    ZeroClipboard.create();
+
+    ZeroClipboard.on("ready", function(/* e */) {
+      assert.strictEqual(++step, 3, "An early-add `ready` event handler is dispatched");
+      done1();
+
+      // Delay adding the handlers to prove that it is not just coincidental lateness
+      setTimeout(function() {
+
+        ZeroClipboard.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 4, "A first late-add `ready` event handler is dispatched immediately (and not redispatched)");
+          done2();
+        });
+
+        ZeroClipboard.on("ready", function(/* e */) {
+          assert.strictEqual(++step, 5, "A first late-add `ready` event handler is dispatched immediately");
+          done3();
+        });
+
+      }, 250);
+    });
+
+    assert.strictEqual(++step, 1, "Before emitting...");
+
+    // Act, assert
+    // `emit`-ing event handlers are async (generally)
+    ZeroClipboard.emit("ready");
+
+    assert.strictEqual(++step, 2, "After emitting...");
+  });
+
+
 })(QUnit.module, QUnit.test);
