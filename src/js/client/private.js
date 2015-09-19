@@ -67,44 +67,23 @@ var _clientOn = function(eventType, listener) {
   if (events && events.length) {
     for (i = 0, len = events.length; i < len; i++) {
       eventType = events[i].replace(/^on/, "");
-      added[eventType] = true;
       if (!handlers[eventType]) {
         handlers[eventType] = [];
       }
       handlers[eventType].push(listener);
+
+      // Handle repeating events to ONLY this newly added subset of listeners
+      if (!added[eventType]) {
+        added[eventType] = [];
+      }
+      added[eventType].push(listener);
     }
 
-    // The following events must be memorized and fired immediately if relevant as they only occur
+    // Some events must be memorized and fired immediately if relevant as they only occur
     // once per Flash object load.
-
-    // If the SWF was already loaded, we're à gogo!
-    if (added.ready && _flashState.ready) {
-      this.emit({
-        type: "ready",
-        client: this
-      });
-    }
-    if (added.error) {
-      for (i = 0, len = _flashStateErrorNames.length; i < len; i++) {
-        if (_flashState[_flashStateErrorNames[i].replace(/^flash-/, "")]) {
-          this.emit({
-            type: "error",
-            name: _flashStateErrorNames[i],
-            client: this
-          });
-          break;
-        }
-      }
-      if (_zcSwfVersion !== undefined && ZeroClipboard.version !== _zcSwfVersion) {
-        this.emit({
-          type: "error",
-          name: "version-mismatch",
-          jsVersion: ZeroClipboard.version,
-          swfVersion: _zcSwfVersion
-        });
-      }
-    }
+    _repeatEvents.call(this, added);
   }
+
   return this;
 };
 
@@ -186,13 +165,17 @@ var _clientListeners = function(eventType) {
  * @private
  */
 var _clientEmit = function(event) {
+  // Private argument; OK if `undefined`
+  var handlersSet = arguments[1];
+
   if (_clientShouldEmit.call(this, event)) {
     // Don't modify the original Event, if it is an object (as expected)
     if (typeof event === "object" && event && typeof event.type === "string" && event.type) {
       event = _extend({}, event);
     }
     var eventCopy = _extend({}, _createEvent(event), { client: this });
-    _clientDispatchCallbacks.call(this, eventCopy);
+
+    _clientDispatchCallbacks.call(this, eventCopy, handlersSet);
   }
   return this;
 };
@@ -325,8 +308,12 @@ var _clientDestroy = function() {
  * @private
  */
 var _clientShouldEmit = function(event) {
-  // If no event is received
-  if (!(event && event.type)) {
+  // If only receiving an eventType string but it is empty...
+  if (typeof event === "string" && !event.replace(/\s+/g, "")) {
+    return false;
+  }
+  // If no event object or an object without an event type is received
+  else if (!(event && event.type)) {
     return false;
   }
 
@@ -360,7 +347,7 @@ var _clientShouldEmit = function(event) {
  * @returns `undefined`
  * @private
  */
-var _clientDispatchCallbacks = function(event) {
+var _clientDispatchCallbacks = function(event, handlersSet) {
   var meta = _clientMeta[this.id];
 
   if (!(typeof event === "object" && event && event.type && meta)) {
@@ -369,9 +356,14 @@ var _clientDispatchCallbacks = function(event) {
 
   var async = _shouldPerformAsync(event);
 
+  // If not limiting the call to a specific subset of handlers, grab the global list of handlers
+  if (typeof handlersSet === "undefined") {
+    handlersSet = meta && meta.handlers;
+  }
+
   // User defined handlers for events
-  var wildcardTypeHandlers = (meta && meta.handlers["*"]) || [];
-  var specificTypeHandlers = (meta && meta.handlers[event.type]) || [];
+  var wildcardTypeHandlers = (handlersSet && handlersSet["*"]) || [];
+  var specificTypeHandlers = (handlersSet && handlersSet[event.type]) || [];
   // Execute wildcard handlers before type-specific handlers
   var handlers = wildcardTypeHandlers.concat(specificTypeHandlers);
 

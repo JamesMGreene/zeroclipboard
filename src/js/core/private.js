@@ -71,13 +71,70 @@ var _state = function() {
  */
 var _isFlashUnusable = function() {
   return !!(
+    _flashState.sandboxed ||
     _flashState.disabled ||
     _flashState.outdated ||
-    _flashState.sandboxed ||
     _flashState.unavailable ||
     _flashState.degraded ||
     _flashState.deactivated
   );
+};
+
+
+/**
+ * When new event handlers are added, some events may need to be re-emitted.
+ * However, be sure to check that they aren't already queued to be emitted.
+ * @private
+ */
+var _repeatEvents = function(handlersSet) {
+  var hasWildcard, i, len,
+      eventTypes = handlersSet ? Object.keys(handlersSet) : null;
+
+  if (eventTypes && eventTypes.length) {
+
+    hasWildcard = eventTypes.indexOf("*") !== -1;
+
+    // If the SWF was already loaded, we're à gogo!
+    if ((hasWildcard || eventTypes.indexOf("ready") !== -1) && _flashState.ready) {
+      this.emit(
+        {
+          type:   "ready",
+          client: this !== ZeroClipboard && this ? this : undefined
+        },
+        handlersSet
+      );
+    }
+
+    if (hasWildcard || eventTypes.indexOf("error") !== -1) {
+      for (i = 0, len = _flashStateErrorNames.length; i < len; i++) {
+        if (_flashState[_flashStateErrorNames[i].replace(/^flash-/, "")] === true) {
+          this.emit(
+            {
+              type: "error",
+              name: _flashStateErrorNames[i],
+              client: this !== ZeroClipboard && this ? this : undefined
+            },
+            handlersSet
+          );
+          // Stop after the first `_flashState` error is found (should be the most severe)
+          break;
+        }
+      }
+
+      if (_zcSwfVersion !== undefined && ZeroClipboard.version !== _zcSwfVersion) {
+        this.emit(
+          {
+            type: "error",
+            name: "version-mismatch",
+            jsVersion: ZeroClipboard.version,
+            swfVersion: _zcSwfVersion,
+            client: this !== ZeroClipboard && this ? this : undefined
+          },
+          handlersSet
+        );
+      }
+    }
+  }
 };
 
 
@@ -92,52 +149,33 @@ var _on = function(eventType, listener) {
   if (typeof eventType === "string" && eventType) {
     events = eventType.toLowerCase().split(/\s+/);
   }
-  else if (typeof eventType === "object" && eventType && typeof listener === "undefined") {
-    for (i in eventType) {
-      if (_hasOwn.call(eventType, i) && typeof i === "string" && i && typeof eventType[i] === "function") {
-        ZeroClipboard.on(i, eventType[i]);
+  else if (typeof eventType === "object" && eventType && !("length" in eventType) && typeof listener === "undefined") {
+    Object.keys(eventType).forEach(function(key) {
+      var listener = eventType[key];
+      if (typeof listener === "function") {
+        ZeroClipboard.on(key, listener);
       }
-    }
+    });
   }
 
-  if (events && events.length) {
+  if (events && events.length && listener) {
     for (i = 0, len = events.length; i < len; i++) {
       eventType = events[i].replace(/^on/, "");
-      added[eventType] = true;
       if (!_handlers[eventType]) {
         _handlers[eventType] = [];
       }
       _handlers[eventType].push(listener);
+
+      // Handle repeating events to ONLY this newly added subset of listeners
+      if (!added[eventType]) {
+        added[eventType] = [];
+      }
+      added[eventType].push(listener);
     }
 
-    // The following events must be memorized and fired immediately if relevant as they only occur
+    // Some events must be memorized and fired immediately if relevant as they only occur
     // once per Flash object load.
-
-    // If the SWF was already loaded, we're à gogo!
-    if (added.ready && _flashState.ready) {
-      ZeroClipboard.emit({
-        type: "ready"
-      });
-    }
-    if (added.error) {
-      for (i = 0, len = _flashStateErrorNames.length; i < len; i++) {
-        if (_flashState[_flashStateErrorNames[i].replace(/^flash-/, "")] === true) {
-          ZeroClipboard.emit({
-            type: "error",
-            name: _flashStateErrorNames[i]
-          });
-          break;
-        }
-      }
-      if (_zcSwfVersion !== undefined && ZeroClipboard.version !== _zcSwfVersion) {
-        ZeroClipboard.emit({
-          type: "error",
-          name: "version-mismatch",
-          jsVersion: ZeroClipboard.version,
-          swfVersion: _zcSwfVersion
-        });
-      }
-    }
+    _repeatEvents.call(ZeroClipboard, added);
   }
 
   return ZeroClipboard;
@@ -157,12 +195,13 @@ var _off = function(eventType, listener) {
   else if (typeof eventType === "string" && eventType) {
     events = eventType.split(/\s+/);
   }
-  else if (typeof eventType === "object" && eventType && typeof listener === "undefined") {
-    for (i in eventType) {
-      if (_hasOwn.call(eventType, i) && typeof i === "string" && i && typeof eventType[i] === "function") {
-        ZeroClipboard.off(i, eventType[i]);
+  else if (typeof eventType === "object" && eventType && !("length" in eventType) && typeof listener === "undefined") {
+    Object.keys(eventType).forEach(function(key) {
+      var listener = eventType[key];
+      if (typeof listener === "function") {
+        ZeroClipboard.off(key, listener);
       }
-    }
+    });
   }
 
   if (events && events.length) {
@@ -210,7 +249,9 @@ var _listeners = function(eventType) {
  * @private
  */
 var _emit = function(event) {
-  var eventCopy, returnVal, tmp;
+  var eventCopy, returnVal, tmp,
+      // Private argument; OK if `undefined`
+      handlersSet = arguments[1];
 
   // Create an event object for this event type
   event = _createEvent(event);
@@ -226,12 +267,12 @@ var _emit = function(event) {
 
   // If this was a Flash "ready" event that was overdue, bail out and fire an "error" event instead
   if (event.type === "ready" && _flashState.overdue === true) {
-    return ZeroClipboard.emit({ "type": "error", "name": "flash-overdue" });
+    return ZeroClipboard.emit({ type: "error", name: "flash-overdue" }, handlersSet);
   }
 
   // Trigger any and all registered event handlers
   eventCopy = _extend({}, event);
-  _dispatchCallbacks.call(this, eventCopy);
+  _dispatchCallbacks.call(this, eventCopy, handlersSet);
 
   // For the `copy` event, be sure to return the `_clipData` to Flash to be injected into the clipboard
   if (event.type === "copy") {
@@ -671,16 +712,21 @@ var _dispatchCallback = function(func, context, args, async) {
  * @returns `undefined`
  * @private
  */
-var _dispatchCallbacks = function(event) {
+var _dispatchCallbacks = function(event, handlersSet) {
   if (!(typeof event === "object" && event && event.type)) {
     return;
   }
 
   var async = _shouldPerformAsync(event);
 
+  // If not limiting the call to a specific subset of handlers, grab the global list of handlers
+  if (typeof handlersSet === "undefined") {
+    handlersSet = _handlers;
+  }
+
   // User defined handlers for events
-  var wildcardTypeHandlers = _handlers["*"] || [];
-  var specificTypeHandlers = _handlers[event.type] || [];
+  var wildcardTypeHandlers = handlersSet["*"] || [];
+  var specificTypeHandlers = handlersSet[event.type] || [];
   // Execute wildcard handlers before type-specific handlers
   var handlers = wildcardTypeHandlers.concat(specificTypeHandlers);
 
@@ -790,9 +836,9 @@ var _preprocessEvent = function(event) {
 
       var wasDeactivated = _flashState.deactivated === true;
       _extend(_flashState, {
+        sandboxed:   false,
         disabled:    false,
         outdated:    false,
-        sandboxed:   false,
         unavailable: false,
         degraded:    false,
         deactivated: false,
@@ -1225,7 +1271,7 @@ var _unembedSwf = function() {
     _flashState.deactivated = null;
 
     // Don't keep track of the SWF's ZC library version number
-    // The use of `undefined` here instead of `null` is important
+    // NOTE: The use of `undefined` here instead of `null` is important!
     _zcSwfVersion = undefined;
   }
 };

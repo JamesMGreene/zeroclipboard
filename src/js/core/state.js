@@ -28,9 +28,9 @@ var _flashState = {
   pluginType: "unknown",
 
   // Flash SWF state
+  sandboxed: null,
   disabled: null,
   outdated: null,
-  sandboxed: null,
   unavailable: null,
   degraded: null,
   deactivated: null,
@@ -108,9 +108,9 @@ var _swfFallbackCheckInterval = 0;
 var _eventMessages = {
   "ready": "Flash communication is established",
   "error": {
+    "flash-sandboxed": "Attempting to run Flash in a sandboxed iframe, which is impossible",
     "flash-disabled": "Flash is disabled or not installed. May also be attempting to run Flash in a sandboxed iframe, which is impossible.",
     "flash-outdated": "Flash is too outdated to support ZeroClipboard",
-    "flash-sandboxed": "Attempting to run Flash in a sandboxed iframe, which is impossible",
     "flash-unavailable": "Flash is unable to communicate bidirectionally with JavaScript",
     "flash-degraded": "Flash is unable to preserve data fidelity when communicating with JavaScript",
     "flash-deactivated": "Flash is too outdated for your browser and/or is configured as click-to-activate.\nThis may also mean that the ZeroClipboard SWF object could not be loaded, so please check your `swfPath` configuration and/or network connectivity.\nMay also be attempting to run Flash in a sandboxed iframe, which is impossible.",
@@ -144,9 +144,9 @@ var _errorsThatOnlyOccurAfterFlashLoads = [
  * @private
  */
 var _flashStateErrorNames = [
+  "flash-sandboxed",
   "flash-disabled",
   "flash-outdated",
-  "flash-sandboxed",
   "flash-unavailable",
   "flash-degraded",
   "flash-deactivated",
